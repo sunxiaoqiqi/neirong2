@@ -1,0 +1,266 @@
+import React, { useState } from 'react';
+import { Drawer, Button, Input, message, Upload, Space, Select, Tabs, Form, Checkbox } from 'antd';
+import type { UploadProps } from 'antd';
+import { InboxOutlined, FileImageOutlined, PlusOutlined, FileTextOutlined, SettingOutlined, ToolOutlined } from '@ant-design/icons';
+
+const { TextArea } = Input;
+const { Option } = Select;
+const { TabPane } = Tabs;
+const { Dragger } = Upload;
+
+interface LeftSidebarProps {
+  canvas: any;
+  onAddText: (type?: string) => void;
+  onAddImage: (url: string) => void;
+  onApplyTemplate: (templateId: string) => void;
+}
+
+export default function LeftSidebar({
+  canvas,
+  onAddText,
+  onAddImage,
+  onApplyTemplate,
+}: LeftSidebarProps) {
+  // 模板相关状态
+  const [templateDrawerVisible, setTemplateDrawerVisible] = useState(false);
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [templateKeyword, setTemplateKeyword] = useState('');
+  const [templateLoading, setTemplateLoading] = useState(false);
+  
+  // 元素相关状态
+  const [elementDrawerVisible, setElementDrawerVisible] = useState(false);
+  const [textDrawerVisible, setTextDrawerVisible] = useState(false);
+  const [imageDrawerVisible, setImageDrawerVisible] = useState(false);
+  const [toolDrawerVisible, setToolDrawerVisible] = useState(false);
+  
+  // 上传图片
+  const handleUploadImage = async (file: File) => {
+    try {
+      // 直接使用本地文件URL，不依赖后端上传
+      const imageUrl = URL.createObjectURL(file);
+      onAddImage(imageUrl);
+      message.success('图片添加成功');
+    } catch (error) {
+      message.error('图片上传失败');
+    }
+    return false;
+  };
+
+  // 添加文字
+  const handleAddText = (type: string) => {
+    onAddText(type);
+    message.success('文字添加成功');
+  };
+
+  const uploadProps: UploadProps = {
+    name: 'image',
+    multiple: false,
+    customRequest: ({ file, onSuccess }) => {
+      handleUploadImage(file as File);
+      setTimeout(() => {
+        onSuccess?.('ok');
+      }, 0);
+    },
+    beforeUpload: () => false,
+  };
+
+  return (
+    <div className="h-full bg-white border-r border-gray-200 flex flex-col">
+      {/* 左侧栏头部 */}
+      <div className="p-4 border-b border-gray-100">
+        <h3 className="text-lg font-semibold mb-2">设计工具</h3>
+        
+        {/* 主要功能按钮 */}
+        <div className="space-y-2">
+          <Button 
+            type="primary" 
+            block 
+            icon={<PlusOutlined />}
+            onClick={() => setElementDrawerVisible(true)}
+          >
+            添加元素
+          </Button>
+          
+          <Button 
+            block 
+            icon={<FileTextOutlined />}
+            onClick={() => setTemplateDrawerVisible(true)}
+          >
+            应用模板
+          </Button>
+          
+          <Button 
+            block 
+            icon={<ToolOutlined />}
+            onClick={() => setToolDrawerVisible(true)}
+          >
+            AI工具
+          </Button>
+        </div>
+      </div>
+      
+      {/* 元素抽屉 */}
+      <Drawer
+        title="添加元素"
+        width={320}
+        placement="left"
+        onClose={() => setElementDrawerVisible(false)}
+        visible={elementDrawerVisible}
+      >
+        <div className="space-y-4">
+          <Button 
+            type="primary" 
+            block 
+            icon={<FileTextOutlined />}
+            onClick={() => {
+              setElementDrawerVisible(false);
+              setTextDrawerVisible(true);
+            }}
+          >
+            添加文字
+          </Button>
+          
+          <Button 
+            type="primary" 
+            block 
+            icon={<FileImageOutlined />}
+            onClick={() => {
+              setElementDrawerVisible(false);
+              setImageDrawerVisible(true);
+            }}
+          >
+            添加图片
+          </Button>
+        </div>
+      </Drawer>
+      
+      {/* 文字抽屉 */}
+      <Drawer
+        title="添加文字"
+        width={320}
+        placement="left"
+        onClose={() => setTextDrawerVisible(false)}
+        visible={textDrawerVisible}
+      >
+        <div className="space-y-4">
+          <Button 
+            type="primary" 
+            block
+            onClick={() => {
+              handleAddText('标题');
+              setTextDrawerVisible(false);
+            }}
+          >
+            标题文本
+          </Button>
+          
+          <Button 
+            block
+            onClick={() => {
+              handleAddText('副标题');
+              setTextDrawerVisible(false);
+            }}
+          >
+            副标题文本
+          </Button>
+          
+          <Button 
+            block
+            onClick={() => {
+              handleAddText('正文');
+              setTextDrawerVisible(false);
+            }}
+          >
+            正文文本
+          </Button>
+        </div>
+      </Drawer>
+      
+      {/* 图片抽屉 */}
+      <Drawer
+        title="添加图片"
+        width={320}
+        placement="left"
+        onClose={() => setImageDrawerVisible(false)}
+        visible={imageDrawerVisible}
+      >
+        <Dragger {...uploadProps}>
+          <p className="ant-upload-drag-icon">
+            <InboxOutlined />
+          </p>
+          <p className="ant-upload-text">点击或拖拽图片到此区域上传</p>
+          <p className="ant-upload-hint">
+            支持单个图片上传，jpg、png、gif 格式
+          </p>
+        </Dragger>
+      </Drawer>
+      
+      {/* 模板抽屉 */}
+      <Drawer
+        title="应用模板"
+        width={320}
+        placement="left"
+        onClose={() => setTemplateDrawerVisible(false)}
+        visible={templateDrawerVisible}
+      >
+        <div className="space-y-4">
+          <Input
+            placeholder="搜索模板"
+            value={templateKeyword}
+            onChange={(e) => setTemplateKeyword(e.target.value)}
+            prefix={<SettingOutlined />}
+          />
+          
+          <div className="text-center py-8">
+            <p>模板功能开发中...</p>
+          </div>
+        </div>
+      </Drawer>
+      
+      {/* AI工具抽屉 */}
+      <Drawer
+        title="AI工具"
+        width={320}
+        placement="left"
+        onClose={() => setToolDrawerVisible(false)}
+        visible={toolDrawerVisible}
+      >
+        <div className="space-y-4">
+          <Tabs defaultActiveKey="1">
+            <TabPane tab="文案生成" key="1">
+              <div className="space-y-4">
+                <Form layout="vertical">
+                  <Form.Item label="输入内容">
+                    <TextArea rows={4} placeholder="请输入需要处理的文案" />
+                  </Form.Item>
+                  
+                  <Form.Item>
+                    <Button type="primary" block>
+                      生成文案
+                    </Button>
+                  </Form.Item>
+                </Form>
+              </div>
+            </TabPane>
+            
+            <TabPane tab="图片生成" key="2">
+              <div className="space-y-4">
+                <Form layout="vertical">
+                  <Form.Item label="提示词">
+                    <TextArea rows={4} placeholder="请输入图片生成提示词" />
+                  </Form.Item>
+                  
+                  <Form.Item>
+                    <Button type="primary" block>
+                      生成图片
+                    </Button>
+                  </Form.Item>
+                </Form>
+              </div>
+            </TabPane>
+          </Tabs>
+        </div>
+      </Drawer>
+    </div>
+  );
+}

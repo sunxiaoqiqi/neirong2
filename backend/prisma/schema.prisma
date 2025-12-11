@@ -1,0 +1,97 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Work {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  canvasData  String?  // JSON string
+  thumbnailUrl String?
+  folderId    Int?
+  tags        String?  // JSON array string
+  status      String   @default("draft")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+  userId      Int?
+
+  @@index([userId])
+  @@index([folderId])
+}
+
+model Template {
+  id          Int      @id @default(autoincrement())
+  name        String
+  canvasData  String?
+  thumbnailUrl String?
+  tags        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+  userId      Int?
+
+  @@index([userId])
+}
+
+model Material {
+  id          Int      @id @default(autoincrement())
+  name        String
+  type        String   // image, text, background, element
+  fileUrl     String
+  fileSize    Int?
+  folderId    Int?
+  tags        String?
+  metadata    String?  // JSON string
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+  userId      Int?
+
+  @@index([userId])
+  @@index([type])
+  @@index([folderId])
+}
+
+model Folder {
+  id          Int      @id @default(autoincrement())
+  name        String
+  parentId    Int?
+  type        String   // work, template, material
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+  userId      Int?
+
+  @@index([userId])
+  @@index([parentId])
+}
+
+model Tag {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  color       String?
+  createdAt   DateTime @default(now())
+  userId      Int?
+
+  @@index([userId])
+}
+
+model AIUsage {
+  id          Int      @id @default(autoincrement())
+  model       String   // 模型名称，如 qwen-turbo, qwen-plus, wanx-v1
+  type        String   // text-rewrite, image-generate
+  inputTokens Int      @default(0)
+  outputTokens Int     @default(0)
+  createdAt   DateTime @default(now())
+  userId      Int?
+
+  @@index([model])
+  @@index([type])
+  @@index([createdAt])
+}
+

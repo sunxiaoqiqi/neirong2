@@ -1,0 +1,41 @@
+import React, { useState } from "react";
+import { Button, Drawer } from "antd";
+import {
+  FileImageOutlined,
+  AppstoreOutlined,
+  SearchOutlined,
+  FormOutlined,
+  UploadOutlined,
+  CodeOutlined,
+  DeleteOutlined,
+  BarChartOutlined,
+  CopyOutlined,
+  EditOutlined
+} from "@ant-design/icons";
+
+export default function LeftSidebar({
+  canvas,
+  onAddText,
+  onAddImage,
+  onApplyTemplate
+}) {
+  // 基本状态
+  const [textDrawerVisible, setTextDrawerVisible] = useState(false);
+  const [imageDrawerVisible, setImageDrawerVisible] = useState(false);
+
+  return (
+    <div className="left-sidebar">
+      <div className="sidebar-header">
+        <h3>工具箱</h3>
+      </div>
+      <div className="sidebar-content">
+        <Button onClick={() => setTextDrawerVisible(true)}>
+          添加文本
+        </Button>
+        <Button onClick={() => setImageDrawerVisible(true)}>
+          添加图片
+        </Button>
+      </div>
+    </div>
+  );
+};
