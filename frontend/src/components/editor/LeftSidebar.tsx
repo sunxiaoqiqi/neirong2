@@ -90,7 +90,7 @@ export default function LeftSidebar({
     canvas,
     onAddText,
     onAddImage,
-    onApplyTemplate
+    onApplyTemplate,
   }) {
   // 模板相关状态
   const [templateDrawerVisible, setTemplateDrawerVisible] = useState(false)
@@ -465,11 +465,17 @@ export default function LeftSidebar({
     
     // 添加结尾建议，再次强调JSON格式要求
     prompt += `\n\n重要提醒：
-1. 请严格按照要求的JSON格式输出结果，使用canvas1, canvas2等字段标识不同画布
-2. 为每个画布提供主题内容，并跟随对应的CODE_标字段数据
-3. 不要在JSON中添加"content"、"structure"等其他字段
-4. 请确保输出的JSON是有效的，不包含任何额外的说明文字或解释
-5. 示例格式：`
+`
+    prompt += `1. 请严格按照要求的JSON格式输出结果，使用canvas1, canvas2等字段标识不同画布
+`
+    prompt += `2. 为每个画布提供主题内容，并跟随对应的CODE_标字段数据
+`
+    prompt += `3. 不要在JSON中添加"content"、"structure"等其他字段
+`
+    prompt += `4. 请确保输出的JSON是有效的，不包含任何额外的说明文字或解释
+`
+    prompt += `5. 示例格式：
+`
     prompt += `{"canvas1": "主题1", "CODE_标 1": "内容1", "CODE_标 2": "内容2", "canvas2": "主题2", ...}`
     
     setAiPromptResult(prompt)
@@ -629,20 +635,20 @@ export default function LeftSidebar({
             const textElement = textElementsCopy[emojiElementIndex]
             const obj = canvas.getObjects().find(o => o.id === textElement.id)
             if (obj && (obj.type === 'textbox' || obj.type === 'text')) {
-              const maxLength = textElement.estimatedMaxChars || 100
-              obj.set('text', smartTruncate(paragraph, maxLength))
-              // 从候选列表中移除已处理的元素
-              textElementsCopy.splice(emojiElementIndex, 1)
-              // 从段落列表中移除已使用的段落
-              paragraphs[index] = ''
-              processedElements++
-            }
-          }
+            const maxLength = textElement.estimatedMaxChars || 100
+            obj.set('text', smartTruncate(paragraph, maxLength))
+          // 从候选列表中移除已处理的元素
+          textElementsCopy.splice(emojiElementIndex, 1)
+          // 从段落列表中移除已使用的段落
+          paragraphs[index] = ''
+          processedElements++
         }
-      })
-      
-      // 过滤掉已使用的空段落
-      const remainingParagraphs = paragraphs.filter(p => p.trim())
+      }
+    }
+        })
+        
+        // 过滤掉已使用的空段落
+        const remainingParagraphs = paragraphs.filter(p => p.trim())
         
         // 第二遍：智能匹配剩余文本元素（增强版）
         // 1. 先尝试根据文本类型匹配
@@ -721,9 +727,7 @@ export default function LeftSidebar({
       if (aiResultInput) {
         aiResultInput.value = ''
       }
-    }
-  }
-
+}
   // AI工具相关状态
   const [rewriteText, setRewriteText] = useState('')
   const [rewritePrompt, setRewritePrompt] = useState('')
@@ -1494,8 +1498,8 @@ export default function LeftSidebar({
         
       default:
         throw new Error(`不支持的元素类型: ${element.type}`)
-    }
-  
+      }
+  }
   // validateColor函数已移至组件顶层
 
   return (

@@ -508,73 +508,19 @@ export default function Editor() {
   
   // 多画布管理函数
   const addNewCanvas = () => {
-    console.log('Creating new canvas...')
-    
-    // 首先保存当前画布状态，确保之前的更改被正确保存
-    const saveSuccess = saveCurrentCanvasState()
-    if (!saveSuccess) {
-      console.warn('Failed to save current canvas state before adding new canvas')
-    }
-    
-    // 创建一个全新的空画布
     const newCanvas = createNewCanvas()
-    
-    // 确保新画布是空的
-    console.log('New canvas created with', newCanvas.getObjects().length, 'objects')
-    
-    // 创建canvases数组的新副本，添加新画布
     const newCanvases = [...canvases, newCanvas]
     setCanvases(newCanvases)
-    
-    // 切换到新画布
-    const newIndex = newCanvases.length - 1
-    setCurrentCanvasIndex(newIndex)
+    setCurrentCanvasIndex(newCanvases.length - 1)
     setCanvas(newCanvas)
-    
-    // 强制延迟渲染，确保状态更新完成
-    setTimeout(() => {
-      // 更新画布显示
-      renderCanvasToMainElement(newCanvas)
-      
-      // 记录创建完成
-      console.log('New canvas added at index', newIndex)
-      
-      setHasUnsavedChanges(true)
-    }, 0)
+    setHasUnsavedChanges(true)
   }
   
-  // 保存当前画布状态到canvases数组
-  const saveCurrentCanvasState = () => {
-    if (canvas && currentCanvasIndex >= 0 && currentCanvasIndex < canvases.length) {
-      // 创建更新后的canvases数组
-      const updatedCanvases = [...canvases]
-      
-      // 确保画布内容被正确保存到状态中
-      // 我们不需要重新创建画布对象，只需要确保引用关系正确
-      // fabric.js对象在内存中的状态已经包含了所有元素信息
-      
-      // 更新canvases数组中对应索引的画布状态
-      updatedCanvases[currentCanvasIndex] = canvas
-      
-      // 更新状态，确保React组件重新渲染
-      setCanvases(updatedCanvases)
-      
-      // 记录调试信息
-      console.log('Canvas state saved:', { canvasIndex: currentCanvasIndex, objectsCount: canvas.getObjects().length })
-      return true
-    }
-    console.warn('Failed to save canvas state:', { canvas, currentCanvasIndex, canvasesLength: canvases.length })
-    return false
-  }
-
   const deleteCanvas = (index: number) => {
     if (canvases.length <= 1) {
       message.warning('至少保留一个画布')
       return
     }
-    
-    // 删除前先保存当前画布状态
-    saveCurrentCanvasState()
     
     Modal.confirm({
       title: '删除画布',
@@ -610,143 +556,38 @@ export default function Editor() {
   }
   
   const switchCanvas = (index: number) => {
-    // 参数验证
-    if (index === currentCanvasIndex || index < 0 || index >= canvases.length) {
-      console.warn('Invalid canvas index for switch:', index)
-      return
-    }
-    
-    // 记录切换前的状态
-    console.log(`Switching from canvas ${currentCanvasIndex} to ${index}`)
-    
-    // 切换前保存当前画布状态，确保所有更改被保存
-    const saveSuccess = saveCurrentCanvasState()
-    if (!saveSuccess) {
-      console.warn('Failed to save current canvas state before switch')
-    }
-    
-    // 设置新的当前画布索引
-    setCurrentCanvasIndex(index)
-    
-    // 设置新的当前画布
-    const targetCanvas = canvases[index]
-    setCanvas(targetCanvas)
-    
-    // 确保目标画布有正确的引用
-    console.log(`Target canvas has ${targetCanvas.getObjects().length} objects`)
-    
-    // 强制延迟渲染，确保状态更新完成
-    setTimeout(() => {
-      // 将选中的画布渲染到主画布元素，确保正确显示内容
+    if (index >= 0 && index < canvases.length) {
+      const targetCanvas = canvases[index]
+      setCurrentCanvasIndex(index)
+      setCanvas(targetCanvas)
       renderCanvasToMainElement(targetCanvas)
-      
-      // 标记为有未保存的更改
-      setHasUnsavedChanges(true)
-      console.log('Canvas switch completed')
-    }, 0)
-  }
-  
-  // 添加元素到当前选中的画布
-  const addElementToCurrentCanvas = (element: fabric.Object) => {
-    if (currentCanvasIndex >= 0 && currentCanvasIndex < canvases.length) {
-      // 获取当前活动画布对象
-      const currentCanvas = canvases[currentCanvasIndex];
-      
-      // 确保添加的是元素的一个全新副本，避免引用共享
-      element.clone((clonedElement) => {
-        if (clonedElement) {
-          // 清除ID，确保每个画布上的元素有唯一标识
-          clonedElement.id = undefined;
-          
-          // 添加克隆后的元素到画布
-          currentCanvas.add(clonedElement);
-          
-          // 确保画布渲染
-          currentCanvas.renderAll();
-          
-          // 如果当前显示的就是这个画布，也需要更新显示
-          if (canvas === currentCanvas) {
-            canvas.renderAll();
-          }
-          
-          // 创建更新后的canvases数组，确保状态正确保存
-          const updatedCanvases = [...canvases];
-          updatedCanvases[currentCanvasIndex] = currentCanvas;
-          setCanvases(updatedCanvases);
-          
-          // 标记有未保存的更改
-          setHasUnsavedChanges(true);
-          saveHistory();
-        }
-      });
-      
-      return currentCanvas;
     }
-    return null;
   }
   
   const renderCanvasToMainElement = (targetCanvas: fabric.Canvas) => {
-    if (!canvasRef.current || !canvas) {
-      console.warn('Cannot render canvas: missing canvasRef or canvas object')
-      return
-    }
+    if (!canvasRef.current) return
     
-    // 记录开始渲染
-    console.log('Rendering canvas with', targetCanvas.getObjects().length, 'objects')
+    // 获取目标画布的数据
+    const jsonData = targetCanvas.toJSON()
     
-    // 清空当前主画布的所有对象
-    canvas.clear()
+    // 清空当前主画布
+    const mainCanvas = new fabric.Canvas(canvasRef.current, {
+      width: 1080,
+      height: 1440,
+      backgroundColor: '#ffffff',
+    })
     
-    // 复制画布背景色
-    canvas.backgroundColor = targetCanvas.backgroundColor
-    
-    // 遍历目标画布上的所有对象，逐个复制到当前显示画布
-    const objects = targetCanvas.getObjects();
-    console.log('Objects to render:', objects.length)
-    
-    let clonedCount = 0;
-    objects.forEach((obj, index) => {
-      // 使用fabric.js的原生克隆方法确保属性完整复制
-      fabric.util.object.clone(obj, (clonedObj) => {
-        if (clonedObj) {
-          // 清除可能导致冲突的ID
-          clonedObj.id = undefined;
-          
-          // 确保对象位置和属性不变
-          clonedObj.left = obj.left;
-          clonedObj.top = obj.top;
-          clonedObj.scaleX = obj.scaleX;
-          clonedObj.scaleY = obj.scaleY;
-          clonedObj.angle = obj.angle;
-          
-          // 添加克隆对象到主画布
-          canvas.add(clonedObj);
-          clonedCount++;
-          
-          // 当所有对象都克隆完成后，执行最终渲染
-          if (clonedCount === objects.length) {
-            // 重新设置画布尺寸
-            canvas.setDimensions({
-              width: targetCanvas.width,
-              height: targetCanvas.height
-            });
-            
-            // 重新设置事件监听器
-            canvas.off()
-            setupCanvasEventListeners(canvas)
-            
-            console.log('All objects cloned and added, performing final render')
-            // 强制渲染画布，确保所有元素可见
-            canvas.renderAll()
-          }
-        }
-      });
-    });
-    
-    // 特殊情况：如果没有对象需要渲染，也执行渲染
-    if (objects.length === 0) {
-      canvas.renderAll()
-    }
+    // 加载数据到主画布
+    mainCanvas.loadFromJSON(jsonData, () => {
+      mainCanvas.renderAll()
+      setCanvas(mainCanvas)
+      setupCanvasEventListeners(mainCanvas)
+      
+      // 更新画布引用
+      const newCanvases = [...canvases]
+      newCanvases[currentCanvasIndex] = mainCanvas
+      setCanvases(newCanvases)
+    })
   }
   
   // 获取画布缩略图
@@ -927,9 +768,7 @@ export default function Editor() {
   }
 
   const handleAddText = (type: string) => {
-    // 添加元素前先保存当前画布状态
-    saveCurrentCanvasState()
-    
+    if (!canvas) return
     const defaults: Record<string, { text: string; fontSize: number; name: string }> = {
       title: { text: '标题', fontSize: 32, name: '标题' },
       subtitle: { text: '副标题', fontSize: 24, name: '副标题' },
@@ -943,8 +782,8 @@ export default function Editor() {
     const uniqueName = generateUniqueLayerName(config.name)
 
     const text = new fabric.Textbox(config.text, {
-      left: 1080 / 2,
-      top: 1440 / 2,
+      left: canvas.width! / 2,
+      top: canvas.height! / 2,
       fontSize: config.fontSize,
       fontFamily: 'Arial',
       fill: '#000000',
@@ -953,17 +792,14 @@ export default function Editor() {
       name: uniqueName, // 设置唯一名称
     })
 
-    const targetCanvas = addElementToCurrentCanvas(text)
-    if (targetCanvas) {
-      targetCanvas.setActiveObject(text)
-      setHasUnsavedChanges(true)
-      saveHistory()
-    }
+    canvas.add(text)
+    canvas.setActiveObject(text)
+    canvas.renderAll()
+    setHasUnsavedChanges(true)
   }
 
   const handleAddImage = (imageUrl: string) => {
-    // 添加元素前先保存当前画布状态
-    saveCurrentCanvasState()
+    if (!canvas) return
     
     // 创建一个新的Image元素，先加载图片
     const imgElement = new Image();
@@ -975,8 +811,8 @@ export default function Editor() {
       
       // 使用已加载的Image元素创建fabric图片对象
       const fabricImage = new fabric.Image(imgElement, {
-        left: 1080 / 2,
-        top: 1440 / 2,
+        left: canvas.width! / 2,
+        top: canvas.height! / 2,
         originX: 'center',
         originY: 'center',
         scaleX: 0.5,
@@ -985,17 +821,16 @@ export default function Editor() {
         name: uniqueName, // 设置唯一名称
       });
       
-      // 使用addElementToCurrentCanvas方法添加图片
-      const targetCanvas = addElementToCurrentCanvas(fabricImage);
-      if (targetCanvas) {
-        // 确保图片在最上层
-        targetCanvas.bringToFront(fabricImage);
-        // 选中图片
-        targetCanvas.setActiveObject(fabricImage);
-        // 更新历史记录
-        setHasUnsavedChanges(true);
-        saveHistory();
-      }
+      // 确保图片添加到画布
+      canvas.add(fabricImage);
+      // 确保图片在最上层
+      canvas.bringToFront(fabricImage);
+      // 选中图片
+      canvas.setActiveObject(fabricImage);
+      // 渲染画布
+      canvas.renderAll();
+      // 更新历史记录
+      setHasUnsavedChanges(true);
     };
     
     imgElement.onerror = (error) => {
@@ -1420,7 +1255,7 @@ export default function Editor() {
       <div className="flex-1 flex pb-20" /* 添加底部padding，避免被画布横栏遮挡 */>
         {/* 左侧工具栏 */}
         <LeftSidebar
-          canvas={canvases[currentCanvasIndex] || canvas}
+          canvas={canvas}
           onAddText={handleAddText}
           onAddImage={handleAddImage}
           onApplyTemplate={handleApplyTemplate}
