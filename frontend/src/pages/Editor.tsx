@@ -54,8 +54,8 @@ export default function Editor() {
     const json = JSON.stringify(canvas.toJSON())
     const newHistory = history.slice(0, historyIndex + 1)
     newHistory.push(json)
-    // 最多保存20步
-    if (newHistory.length > 20) {
+    // 最多保存10步操作历史
+    if (newHistory.length > 10) {
       newHistory.shift()
     } else {
       setHistoryIndex(newHistory.length - 1)
@@ -71,18 +71,15 @@ export default function Editor() {
     tempCanvasEl.style.display = 'none'
     document.body.appendChild(tempCanvasEl)
     
+    // 创建一个全新的空白画布，不继承任何现有内容
     const fabricCanvas = new fabric.Canvas(tempCanvasEl, {
       width: 1080,
       height: 1440,
       backgroundColor: '#ffffff',
+      // 确保使用独立的画布实例
+      preserveObjectStacking: true,
+      selection: true
     })
-    
-    // 加载初始数据
-    if (initialData) {
-      fabricCanvas.loadFromJSON(JSON.parse(initialData), () => {
-        fabricCanvas.renderAll()
-      })
-    }
     
     // 设置画布模式和其他属性
     const canvas = fabricCanvas as any
@@ -95,6 +92,23 @@ export default function Editor() {
     canvas._eraseBrush = null
     canvas._isErasing = false
     
+    // 只在明确提供初始数据时加载
+    if (initialData) {
+      fabricCanvas.loadFromJSON(JSON.parse(initialData), () => {
+        fabricCanvas.renderAll()
+        // 保存初始数据
+        fabricCanvas.__jsonData = initialData
+      })
+    } else {
+      // 为新画布保存一个空的初始状态
+      fabricCanvas.__jsonData = JSON.stringify({
+        objects: [],
+        background: '#ffffff',
+        width: 1080,
+        height: 1440
+      })
+    }
+    
     // 添加事件监听
     setupCanvasEventListeners(fabricCanvas)
     
@@ -104,11 +118,11 @@ export default function Editor() {
   // 设置画布事件监听
   const setupCanvasEventListeners = (fabricCanvas: fabric.Canvas) => {
     // 监听对象选中
-    fabricCanvas.on('selection:created', (e) => {
+    fabricCanvas.on('selection:created', (e: any) => {
       setSelectedObject(e.selected?.[0] || null)
     })
 
-    fabricCanvas.on('selection:updated', (e) => {
+    fabricCanvas.on('selection:updated', (e: any) => {
       setSelectedObject(e.selected?.[0] || null)
     })
 
@@ -155,14 +169,17 @@ export default function Editor() {
     if (!canvasRef.current) return
 
     // 初始化Fabric.js画布
-    const fabricCanvas = new fabric.Canvas(canvasRef.current, {
+    const fabricCanvas = new (fabric.Canvas as any)(canvasRef.current, {
       width: 1080,
       height: 1440,
       backgroundColor: '#ffffff',
-    })
+    }) as fabric.Canvas
+    
+    // 确保evented属性为true，修复元素无法拖动的问题
+    (fabricCanvas as any).evented = true
 
     // 设置画布引用
-    setCanvas(fabricCanvas)
+    setCanvas(fabricCanvas as any)
     const initialCanvases = [fabricCanvas]
     setCanvases(initialCanvases)
     setCurrentCanvasIndex(0)
@@ -203,8 +220,8 @@ export default function Editor() {
         // 阻止默认行为
         e.preventDefault();
         
-        // 调用撤销函数
-        handleUndo();
+        // 调用撤销函数（使用新的按步数撤销函数，默认撤销1步）
+        handleUndoBySteps(1);
       }
     };
     
@@ -283,7 +300,7 @@ export default function Editor() {
       setupCanvasEventListeners(fabricCanvas)
     
     // 双击开始和结束裁剪区域选择
-    fabricCanvas.on('mouse:dblclick', (e) => {
+    fabricCanvas.on('mouse:dblclick', (e: any) => {
       if (canvas._mode === 'crop' && canvas._cropTarget) {
         const pointer = fabricCanvas.getPointer(e.e);
         
@@ -328,14 +345,14 @@ export default function Editor() {
     });
     
     // 拖动调整裁剪区域
-    fabricCanvas.on('object:moving', (e) => {
+    fabricCanvas.on('object:moving', (e: any) => {
       if (canvas._mode === 'crop' && canvas._cropTarget && canvas._cropRectangle && e.target === canvas._cropRectangle) {
         // 允许移动裁剪矩形
         fabricCanvas.renderAll();
       }
     });
-    
-    fabricCanvas.on('object:scaling', (e) => {
+
+    fabricCanvas.on('object:scaling', (e: any) => {
       if (canvas._mode === 'crop' && canvas._cropTarget && canvas._cropRectangle && e.target === canvas._cropRectangle) {
         // 允许调整裁剪矩形大小
         fabricCanvas.renderAll();
@@ -343,7 +360,7 @@ export default function Editor() {
     });
     
     // 魔法棒工具点击事件
-    fabricCanvas.on('mouse:down', (e) => {
+    fabricCanvas.on('mouse:down', (e: any) => {
       if (canvas._mode === 'magicWand' && canvas._magicWandTarget) {
         const pointer = fabricCanvas.getPointer(e.e);
         
@@ -411,7 +428,10 @@ export default function Editor() {
     });
 
     // 保存初始缩放值到canvas对象
-    (fabricCanvas as any)._zoom = zoom
+    (fabricCanvas as any)._zoom = +zoom // 使用一元加号运算符确保数值类型
+    
+    // 确保evented属性为true，防止任何地方错误修改导致元素无法拖动
+    Object.assign(fabricCanvas, { evented: true });
     
     // 初始化canvas上下文
     fabricCanvas.renderAll()
@@ -424,7 +444,7 @@ export default function Editor() {
     // 加载作品数据
     if (id) {
       // 直接使用fabricCanvas对象，而不是等待setCanvas更新状态
-      const workId = Number(id)
+      const workId = parseInt(id)
       workService.getWork(workId)
         .then((response) => {
           // 注意：由于响应拦截器的处理，response已经是Work对象本身，没有data字段
@@ -499,7 +519,7 @@ export default function Editor() {
         },
       });
 
-      return uploadResponse.thumbnailUrl;
+      return (uploadResponse as any).thumbnailUrl;
     } catch (error) {
       console.error('上传缩略图失败:', error);
       return null;
@@ -514,6 +534,12 @@ export default function Editor() {
     setCurrentCanvasIndex(newCanvases.length - 1)
     setCanvas(newCanvas)
     setHasUnsavedChanges(true)
+    
+    // 确保新创建的空白画布立即渲染到主元素上
+    // 使用setTimeout确保状态更新后再执行渲染
+    setTimeout(() => {
+      renderCanvasToMainElement(newCanvas)
+    }, 0)
   }
   
   const deleteCanvas = (index: number) => {
@@ -529,7 +555,7 @@ export default function Editor() {
       okType: 'danger',
       onOk: () => {
         const canvasToDelete = canvases[index]
-        if (canvasToDelete !== canvasRef.current?.fabric) {
+        if (canvasToDelete !== (canvasRef.current as any)?.fabric) {
           canvasToDelete.dispose()
           const canvasEl = canvasToDelete.getElement()
           if (canvasEl && canvasEl.parentNode) {
@@ -557,6 +583,24 @@ export default function Editor() {
   
   const switchCanvas = (index: number) => {
     if (index >= 0 && index < canvases.length) {
+      // 切换前保存当前画布状态
+      if (canvas && currentCanvasIndex >= 0 && currentCanvasIndex < canvases.length) {
+        const currentCanvasCopy = canvases[currentCanvasIndex]
+        const jsonData = canvas.toJSON()
+        
+        // 保存当前画布的JSON数据到对应的引用中
+        // 创建一个临时容器来存储数据
+        if (!currentCanvasCopy.__jsonData) {
+          Object.defineProperty(currentCanvasCopy, '__jsonData', {
+            value: JSON.stringify(jsonData),
+            writable: true,
+            enumerable: false
+          })
+        } else {
+          currentCanvasCopy.__jsonData = JSON.stringify(jsonData)
+        }
+      }
+      
       const targetCanvas = canvases[index]
       setCurrentCanvasIndex(index)
       setCanvas(targetCanvas)
@@ -567,26 +611,42 @@ export default function Editor() {
   const renderCanvasToMainElement = (targetCanvas: fabric.Canvas) => {
     if (!canvasRef.current) return
     
-    // 获取目标画布的数据
-    const jsonData = targetCanvas.toJSON()
+    // 先清除当前画布上的所有事件监听
+    if (canvas) {
+      canvas.off()
+    }
     
-    // 清空当前主画布
+    // 创建一个新的临时画布实例用于主渲染区域
     const mainCanvas = new fabric.Canvas(canvasRef.current, {
       width: 1080,
       height: 1440,
       backgroundColor: '#ffffff',
     })
     
-    // 加载数据到主画布
-    mainCanvas.loadFromJSON(jsonData, () => {
+    // 获取要渲染的数据 - 优先使用保存的JSON数据
+    let jsonDataToRender
+    if (targetCanvas.__jsonData) {
+      // 使用之前保存的JSON数据
+      try {
+        jsonDataToRender = JSON.parse(targetCanvas.__jsonData)
+      } catch (e) {
+        console.error('解析画布JSON数据失败:', e)
+        // 解析失败时使用当前画布数据
+        jsonDataToRender = targetCanvas.toJSON()
+      }
+    } else {
+      // 如果没有保存的数据，使用当前画布数据
+      jsonDataToRender = targetCanvas.toJSON()
+    }
+    
+    // 加载目标画布的数据到临时渲染画布
+    mainCanvas.loadFromJSON(jsonDataToRender, () => {
       mainCanvas.renderAll()
-      setCanvas(mainCanvas)
+      setCanvas(mainCanvas) // 只更新显示用的canvas状态，不替换原始画布引用
       setupCanvasEventListeners(mainCanvas)
       
-      // 更新画布引用
-      const newCanvases = [...canvases]
-      newCanvases[currentCanvasIndex] = mainCanvas
-      setCanvases(newCanvases)
+      // 重要：不再更新原始的canvases数组，保持每个画布的独立性
+      // 这样确保每个画布的数据都是独立的，不会互相影响
     })
   }
   
@@ -643,11 +703,11 @@ export default function Editor() {
       const thumbnailUrl = await generateAndUploadThumbnail();
 
       if (id) {
-        await workService.updateWork(Number(id), {
+        await workService.updateWork(parseInt(id), ({
           canvasData: data,
           thumbnailUrl,
           ...(name && { name }),
-        })
+        } as any))
         message.success('保存成功！')
         setHasUnsavedChanges(false)
       } else {
@@ -656,11 +716,11 @@ export default function Editor() {
           setSaveNameModalVisible(true)
           return
         }
-        await workService.createWork({
+        await workService.createWork(({
           name,
           canvasData: data,
           thumbnailUrl,
-        })
+        } as any))
         message.success('保存成功！')
         setHasUnsavedChanges(false)
       }
@@ -714,13 +774,18 @@ export default function Editor() {
     message.success('导出成功')
   }
 
-  const handleUndo = () => {
-    if (historyIndex > 0 && canvas) {
-      const newIndex = historyIndex - 1
-      setHistoryIndex(newIndex)
-      canvas.loadFromJSON(JSON.parse(history[newIndex]), () => {
-        canvas.renderAll()
-      })
+  // 注意：原来的handleUndo函数已被handleUndoBySteps(1)替代，以支持按步数撤销功能
+  
+  // 按步数撤销函数（可以撤销多步操作，如撤销到2次操作前）
+  const handleUndoBySteps = (steps: number = 1) => {
+    if (canvas) {
+      const newIndex = Math.max(0, historyIndex - steps)
+      if (newIndex !== historyIndex) {
+        setHistoryIndex(newIndex)
+        canvas.loadFromJSON(JSON.parse(history[newIndex]), () => {
+          canvas.renderAll()
+        })
+      }
     }
   }
 
@@ -843,14 +908,301 @@ export default function Editor() {
   }
 
   const handleApplyTemplate = (templateData: string) => {
-    if (!canvas) return
     try {
-      const data = typeof templateData === 'string' ? JSON.parse(templateData) : templateData
-      canvas.loadFromJSON(data, () => {
-        canvas.renderAll()
-        setHasUnsavedChanges(true)
-      })
+      // 使用自定义的方式解析JSON字符串，能够保留重复键的信息
+      let parsedData = {}
+      let canvasDataArray = []
+      
+      if (typeof templateData === 'string') {
+        console.log('原始模板数据:', templateData)
+        
+        // 优化的字符串解析来处理重复键
+        // 方法1: 基于正则表达式提取所有canvas和CODE_标字段
+        const canvasMatches = templateData.match(/"(canvas\d+)":\s*"([^"]*)"/g) || []
+        const codeMatches = templateData.match(/"(CODE_标 \d+)":\s*"([^"]*)"/g) || []
+        
+        // 创建一个Map来存储每个canvas对应的CODE字段
+        const canvasToCodesMap = new Map()
+        
+        // 处理画布标题
+        canvasMatches.forEach(match => {
+          const [key, value] = match.split(/:\s*/)
+          const cleanKey = key.replace(/"/g, '')
+          const cleanValue = value.replace(/"/g, '').replace(/,$/, '').trim()
+          
+          if (!canvasToCodesMap.has(cleanKey)) {
+            canvasToCodesMap.set(cleanKey, { [cleanKey]: cleanValue })
+          }
+        })
+        
+        // 优化的CODE_标字段分配算法 - 基于原始文件中的行位置
+        // 找到所有画布的位置索引
+        const canvasPositions = {}
+        templateData.split('\n').forEach((line, lineIndex) => {
+          const trimmedLine = line.trim()
+          if (trimmedLine.startsWith('"canvas') && trimmedLine.includes(':')) {
+            const key = trimmedLine.split(':')[0].replace(/"/g, '')
+            canvasPositions[key] = lineIndex
+          }
+        })
+        
+        // 按行顺序将CODE_标字段分配给最近的前一个画布
+        // 先按行索引排序画布
+        const sortedCanvases = Object.entries(canvasPositions)
+          .sort((a, b) => a[1] - b[1])
+          .map(entry => entry[0])
+        
+        // 对每个CODE_标字段进行处理
+        codeMatches.forEach(match => {
+          // 找到这个CODE_标字段在原始数据中的行位置
+          const matchIndex = templateData.indexOf(match)
+          let lineNumber = 0
+          
+          // 计算行号
+          for (let i = 0; i < matchIndex; i++) {
+            if (templateData[i] === '\n') {
+              lineNumber++
+            }
+          }
+          
+          // 找到这个CODE_标字段属于哪个画布
+          // 查找最大的画布行号但小于当前CODE_标字段的行号
+          let assignedCanvas = null
+          for (let i = sortedCanvases.length - 1; i >= 0; i--) {
+            const canvasKey = sortedCanvases[i]
+            if (canvasPositions[canvasKey] <= lineNumber) {
+              assignedCanvas = canvasKey
+              break
+            }
+          }
+          
+          // 如果找到了对应的画布，就分配CODE_标字段
+          if (assignedCanvas && canvasToCodesMap.has(assignedCanvas)) {
+            const [key, value] = match.split(/:\s*/)
+            const cleanKey = key.replace(/"/g, '')
+            const cleanValue = value.replace(/"/g, '').replace(/,$/, '').trim()
+            
+            const canvasData = canvasToCodesMap.get(assignedCanvas)
+            canvasData[cleanKey] = cleanValue
+            console.log(`将 ${cleanKey} = "${cleanValue}" 分配给画布 ${assignedCanvas}`)
+          }
+        })
+        
+        // 转换为数组格式
+        canvasDataArray = Array.from(canvasToCodesMap.values())
+        console.log('基于行位置解析的画布数据映射:', canvasToCodesMap)
+        
+        // 方法2: 原始的逐行解析作为后备
+        let currentCanvas = null
+        let canvasContent = {}
+        const lines = templateData.split('\n')
+        
+        for (const line of lines) {
+          const trimmedLine = line.trim()
+          if (trimmedLine.startsWith('"canvas') && trimmedLine.includes(':')) {
+            // 如果之前有未保存的画布数据，先保存
+            if (currentCanvas && Object.keys(canvasContent).length > 0) {
+              // 确保不重复添加
+              if (!canvasDataArray.some(item => item[currentCanvas] === canvasContent[currentCanvas])) {
+                canvasDataArray.push({...canvasContent})
+              }
+              canvasContent = {}
+            }
+            
+            // 提取画布标题
+            const key = trimmedLine.split(':')[0].replace(/"/g, '')
+            const value = trimmedLine.split(':')[1].replace(/"/g, '').replace(/,$/, '').trim()
+            currentCanvas = key
+            canvasContent[currentCanvas] = value
+          } else if (trimmedLine.startsWith('"CODE_') && trimmedLine.includes(':')) {
+            // 提取CODE_标字段
+            const key = trimmedLine.split(':')[0].replace(/"/g, '')
+            const value = trimmedLine.split(':')[1].replace(/"/g, '').replace(/,$/, '').trim()
+            if (currentCanvas) {
+              canvasContent[key] = value
+            }
+          }
+        }
+        
+        // 保存最后一个画布的数据
+        if (currentCanvas && Object.keys(canvasContent).length > 0) {
+          // 确保不重复添加
+          if (!canvasDataArray.some(item => item[currentCanvas] === canvasContent[currentCanvas])) {
+            canvasDataArray.push({...canvasContent})
+          }
+        }
+        
+        // 同时也做标准JSON解析作为后备
+        try {
+          parsedData = JSON.parse(templateData)
+        } catch (e) {
+          console.warn('标准JSON解析失败，使用空对象作为后备:', e)
+          parsedData = {}
+        }
+        
+        console.log('最终解析的画布数据数组:', canvasDataArray)
+      } else {
+        parsedData = templateData
+      }
+      
+      // 检查是否包含多画布数据
+      const canvasKeys = Object.keys(parsedData).filter(key => key.startsWith('canvas'))
+      
+      if (canvasKeys.length > 0) {
+        console.log('检测到多画布模板数据:', canvasKeys)
+        console.log('解析出的画布数据数组:', canvasDataArray)
+        
+        // 按画布索引排序，确保按顺序处理
+        canvasKeys.sort((a, b) => {
+          const numA = parseInt(a.replace('canvas', ''))
+          const numB = parseInt(b.replace('canvas', ''))
+          return numA - numB
+        })
+        
+        // 自动填充每个画布的数据
+        let appliedCanvasCount = 0
+        
+        // 直接为每个画布分配对应的数据
+        canvases.forEach((targetCanvas, canvasIndex) => {
+          const canvasNum = canvasIndex + 1
+          const canvasKey = `canvas${canvasNum}`
+          
+          // 获取当前画布的数据
+          let canvasData = null
+          
+          // 优先从自定义解析的数组中获取数据
+          if (canvasDataArray.length > canvasIndex) {
+            canvasData = canvasDataArray[canvasIndex]
+          } else if (parsedData[canvasKey]) {
+            // 如果没有自定义解析数据，使用标准解析数据
+            canvasData = {[canvasKey]: parsedData[canvasKey]}
+            
+            // 添加CODE_标字段
+            for (let i = 1; i <= 10; i++) { // 假设最多10个CODE_标字段
+              const codeKey = `CODE_标 ${i}`
+              if (parsedData[codeKey] !== undefined) {
+                canvasData[codeKey] = parsedData[codeKey]
+              }
+            }
+          }
+          
+          if (canvasData) {
+            console.log(`处理画布 ${canvasKey} 数据应用`, canvasData)
+            
+            // 为画布保存数据引用
+            if (!targetCanvas.__jsonData) {
+              Object.defineProperty(targetCanvas, '__jsonData', {
+                value: JSON.stringify(canvasData),
+                writable: true,
+                enumerable: false
+              })
+            } else {
+              targetCanvas.__jsonData = JSON.stringify(canvasData)
+            }
+            
+            // 获取画布中的文本元素
+            const textObjects = targetCanvas.getObjects().filter((obj: any) => 
+              obj.type === 'textbox' || obj.type === 'text'
+            )
+            
+            console.log(`画布 ${canvasKey} 中有 ${textObjects.length} 个文本元素`)
+            
+            // 应用画布数据
+            let appliedFields = 0
+            
+            // 处理画布标题（如果有）
+            if (canvasData[canvasKey] && textObjects.length > 0) {
+              try {
+                textObjects[0].set('text', String(canvasData[canvasKey]).trim())
+                console.log(`设置画布 ${canvasKey} 标题成功`)
+              } catch (e) {
+                console.error(`设置标题失败:`, e)
+              }
+            }
+            
+            // 处理CODE_标字段 - 改进版本
+            // 首先找出所有CODE_标字段
+            const codeKeys = Object.keys(canvasData).filter(key => key.startsWith('CODE_'))
+            console.log(`画布 ${canvasKey} 包含 ${codeKeys.length} 个CODE_标字段`, codeKeys)
+            
+            // 按顺序应用CODE_标字段到文本元素
+            codeKeys.forEach((codeKey, codeIndex) => {
+              // 文本元素索引 = 标题(0) + 内容字段索引
+              const targetIndex = codeIndex + 1
+              
+              if (targetIndex < textObjects.length) {
+                try {
+                  const fieldValue = String(canvasData[codeKey] || '').trim()
+                  textObjects[targetIndex].set('text', fieldValue)
+                  console.log(`成功应用 ${codeKey} = "${fieldValue}" 到画布 ${canvasKey} 元素索引 ${targetIndex}`)
+                  appliedFields++
+                } catch (e) {
+                  console.error(`设置元素文本失败:`, e)
+                }
+              } else {
+                console.warn(`没有足够的文本元素应用 ${codeKey}，当前画布只有 ${textObjects.length} 个文本元素`)
+              }
+            })
+            
+            // 确保画布渲染
+            targetCanvas.renderAll()
+            setHasUnsavedChanges(true)
+            appliedCanvasCount++
+          } else {
+            console.log(`画布 ${canvasKey} 没有找到对应的数据`)
+          }
+        })
+        
+        // 增强的强制刷新机制
+        // 第一轮刷新
+        setTimeout(() => {
+          canvases.forEach((canvas, index) => {
+            console.log(`第一轮强制刷新画布 ${index + 1}`)
+            canvas.renderAll()
+          })
+          
+          // 第二轮刷新确保所有内容正确显示
+          setTimeout(() => {
+            canvases.forEach((canvas, index) => {
+              console.log(`第二轮强制刷新画布 ${index + 1}`)
+              canvas.renderAll()
+            })
+          }, 200) // 稍微延迟，确保第一次渲染完成
+        }, 100)
+        
+        // 显示成功消息
+        if (appliedCanvasCount > 0) {
+          // 计算从自定义解析中识别的CODE_标字段总数
+          let totalCodeFields = 0
+          canvasDataArray.forEach(canvasData => {
+            totalCodeFields += Object.keys(canvasData).filter(k => k.includes('CODE_')).length
+          })
+          message.success(`已成功自动填充 ${appliedCanvasCount} 个画布的数据，共识别了 ${totalCodeFields} 个CODE_标字段`)
+        } else {
+          // 详细的诊断信息
+          let totalCodeFields = 0
+          canvasDataArray.forEach(canvasData => {
+            totalCodeFields += Object.keys(canvasData).filter(k => k.includes('CODE_')).length
+          })
+          message.warning(`已识别 ${canvasKeys.length} 个画布和 ${totalCodeFields} 个CODE_标字段，但未能成功应用到画布元素上`)
+          console.warn('未成功应用任何元素的诊断信息:', {
+            canvasCount: canvases.length,
+            canvasKeys: canvasKeys,
+            totalCodeFields: totalCodeFields,
+            canvasDataArray: canvasDataArray
+          })
+        }
+      } else {
+        // 单画布数据处理逻辑
+        if (canvas) {
+          canvas.loadFromJSON(parsedData, () => {
+            canvas.renderAll()
+            setHasUnsavedChanges(true)
+          })
+        }
+      }
     } catch (error) {
+      console.error('应用模板失败:', error)
       message.error('应用模版失败')
     }
   }
@@ -1153,14 +1505,6 @@ export default function Editor() {
     });
   }
 
-  const handleSetBackground = (color: string) => {
-    if (!canvas) return
-    canvas.setBackgroundColor(color, () => {
-      canvas.renderAll()
-      setHasUnsavedChanges(true)
-    })
-  }
-
   return (
     <div className="h-screen flex flex-col">
       {/* 顶部导航栏 */}
@@ -1180,7 +1524,7 @@ export default function Editor() {
               onDuplicate={async () => {
                 if (id && canvas) {
                   try {
-                    await workService.duplicateWork(Number(id))
+                    await workService.duplicateWork(parseInt(id))
                     message.success('副本创建成功')
                   } catch (error) {
                     message.error('创建副本失败')
@@ -1242,7 +1586,7 @@ export default function Editor() {
             <HistoryControls
               canUndo={historyIndex > 0}
               canRedo={historyIndex < history.length - 1}
-              onUndo={handleUndo}
+              onUndo={() => handleUndoBySteps(1)} // 使用新的按步数撤销函数，默认撤销1步
               onRedo={handleRedo}
             />
             <Button icon={<ExportOutlined />} onClick={() => setExportDialogVisible(true)}>
@@ -1259,7 +1603,6 @@ export default function Editor() {
           onAddText={handleAddText}
           onAddImage={handleAddImage}
           onApplyTemplate={handleApplyTemplate}
-          onSetBackground={handleSetBackground}
         />
 
         {/* 中间画布区 */}
@@ -1355,7 +1698,7 @@ export default function Editor() {
         
         {/* 画布列表内容 */}
         {isCanvasBarVisible && (
-          <div className="h-20 flex items-center px-4 overflow-x-auto">
+          <div className="h-[120px] flex items-center px-4 overflow-x-auto">
             <div ref={canvasContainerRef} className="flex items-center space-x-4">
               {canvases.map((canv, index) => (
                 <div
