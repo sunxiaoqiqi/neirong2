@@ -1062,7 +1062,7 @@ export default function Editor() {
         // 自动填充每个画布的数据
         let appliedCanvasCount = 0
         
-        // 直接为每个画布分配对应的数据
+        // 基于canvasKey精确匹配数据到对应的画布
         canvases.forEach((targetCanvas, canvasIndex) => {
           const canvasNum = canvasIndex + 1
           const canvasKey = `canvas${canvasNum}`
@@ -1070,10 +1070,16 @@ export default function Editor() {
           // 获取当前画布的数据
           let canvasData = null
           
-          // 优先从自定义解析的数组中获取数据
-          if (canvasDataArray.length > canvasIndex) {
+          // 优先从自定义解析的数组中通过canvasKey查找对应数据
+          // 这确保canvas1的数据应用到画布1，canvas2的数据应用到画布2
+          canvasData = canvasDataArray.find(item => {
+            return Object.keys(item).includes(canvasKey)
+          })
+          
+          // 如果没有找到，再考虑使用基于索引的方法作为后备
+          if (!canvasData && canvasDataArray.length > canvasIndex) {
             canvasData = canvasDataArray[canvasIndex]
-          } else if (parsedData[canvasKey]) {
+          } else if (!canvasData && parsedData[canvasKey]) {
             // 如果没有自定义解析数据，使用标准解析数据
             canvasData = {[canvasKey]: parsedData[canvasKey]}
             

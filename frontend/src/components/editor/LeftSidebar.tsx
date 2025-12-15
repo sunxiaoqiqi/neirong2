@@ -586,11 +586,13 @@ export default function LeftSidebar({
       
       // 1. 首先尝试解析JSON格式（新增功能）
       let jsonData = null
+      let originalJsonString = null
       try {
         // 清理可能的额外文本，尝试提取JSON部分
         const jsonMatch = aiResult.match(/\{[\s\S]*\}/)
         if (jsonMatch) {
-          jsonData = JSON.parse(jsonMatch[0])
+          originalJsonString = jsonMatch[0]
+          jsonData = JSON.parse(originalJsonString)
           console.log('成功解析JSON格式数据:', jsonData)
           
           // 处理CODE_标格式的JSON数据
@@ -665,131 +667,84 @@ export default function LeftSidebar({
               const currentCanvasIndex = (window.location.pathname.match(/canvas(\d+)/) || [])[1] || '1'
               const currentCanvasKey = `canvas${currentCanvasIndex}`
               
-              // 使用有序数组来确保属性顺序稳定
-              const orderedKeys = Object.keys(jsonData).sort()
+              // 使用原始字符串解析来正确分配CODE_标字段到对应画布
+              // 这样可以保留重复键的信息
+              let currentCanvasForParsing = null
+              let canvasContentForParsing = {}
+              const lines = originalJsonString.split('\n')
               
-              // 创建每个画布的CODE_标字段映射
-              const canvasToCodeFieldsMap = {}
-              let totalProcessedFields = 0
-              let currentCanvasProcessed = false
-              
-              // 为每个画布分配对应的CODE_标字段
-              canvasKeys.forEach((canvasKey, canvasIndex) => {
-                const currentPos = orderedKeys.indexOf(canvasKey)
-                const nextCanvasKey = canvasKeys[canvasIndex + 1]
-                const nextPos = nextCanvasKey ? orderedKeys.indexOf(nextCanvasKey) : orderedKeys.length
-                
-                // 找出属于当前画布的CODE_标字段
-                let canvasCodeKeys = orderedKeys
-                  .filter(key => key.startsWith('CODE_') && orderedKeys.indexOf(key) > currentPos && orderedKeys.indexOf(key) < nextPos)
-                
-                // 方法2: 如果方法1没有找到足够的字段，尝试使用交替分配策略
-                if (canvasCodeKeys.length === 0 && codeKeys.length > 0) {
-                  console.log(`为 ${canvasKey} 使用备用策略分配CODE_标字段`)
-                  canvasCodeKeys = codeKeys.filter((codeKey, index) => {
-                    const codeNumber = parseInt(codeKey.match(/\d+/)[0])
-                    return codeNumber % canvasKeys.length === canvasIndex
-                  })
-                }
-                
-                // 方法3: 如果方法2也失败，平均分配CODE_标字段
-                if (canvasCodeKeys.length === 0 && codeKeys.length > 0) {
-                  console.log(`为 ${canvasKey} 使用通用策略分配CODE_标字段`)
-                  const startIndex = Math.floor(codeKeys.length * canvasIndex / canvasKeys.length)
-                  const endIndex = Math.floor(codeKeys.length * (canvasIndex + 1) / canvasKeys.length)
-                  canvasCodeKeys = codeKeys.slice(startIndex, endIndex)
-                }
-                
-                canvasToCodeFieldsMap[canvasKey] = canvasCodeKeys
-                totalProcessedFields += canvasCodeKeys.length
-                console.log(`${canvasKey} 分配的CODE_标字段:`, canvasCodeKeys)
-              })
-              
-              // 如果当前画布有对应数据，则处理当前画布的字段
-              if (canvasToCodeFieldsMap[currentCanvasKey] && canvasToCodeFieldsMap[currentCanvasKey].length > 0) {
-                const canvasCodeKeys = canvasToCodeFieldsMap[currentCanvasKey]
-                
-                // 处理当前画布的CODE_标字段
-                canvasCodeKeys.forEach(codeKey => {
-                  const codeValue = jsonData[codeKey]
-                  const elementId = codeKey.replace('CODE_', '')
-                  
-                  // 查找匹配元素ID的文本框
-                  const textElement = allTextElements.find(el => el.id === elementId)
-                  
-                  if (textElement) {
-                    const obj = canvas.getObjects().find(o => o.id === textElement.id)
-                    if (obj && (obj.type === 'textbox' || obj.type === 'text')) {
-                      const maxLength = textElement.estimatedMaxChars || 100
-                      obj.set('text', smartTruncate(codeValue, maxLength))
-                      processedElements++
+              // 为当前画布提取CODE_标字段
+              for (const line of lines) {
+                const trimmedLine = line.trim()
+                if (trimmedLine.startsWith('"canvas') && trimmedLine.includes(':')) {
+                  const match = trimmedLine.match(/"(canvas\d+)":\s*"([^"]*)"\s*,?/)
+                  if (match) {
+                    const key = match[1]
+                    if (key === currentCanvasKey) {
+                      currentCanvasForParsing = key
+                      canvasContentForParsing = { [key]: match[2] }
+                    } else if (currentCanvasForParsing) {
+                      // 遇到下一个画布，停止解析
+                      break
                     }
                   }
-                })
-                
-                // 如果当前画布有主题内容，也显示提示
-                const canvasTheme = jsonData[currentCanvasKey]
-                if (typeof canvasTheme === 'string' && canvasTheme.trim()) {
-                  console.log(`画布 ${currentCanvasKey} 主题内容: ${canvasTheme}`)
-                }
-                
-                currentCanvasProcessed = true
-              }
-              
-              // 重要修复：如果通过画布映射没有匹配到元素，但存在CODE_标字段，直接尝试匹配所有CODE_标字段
-              // 这确保主画布不会显示空白
-              if (!currentCanvasProcessed && codeKeys.length > 0) {
-                console.log('当前画布未通过映射匹配到元素，尝试直接匹配所有CODE_标字段')
-                codeKeys.forEach(key => {
-                  const content = jsonData[key]
-                  const element = codeElementMap.get(key)
-                  
-                  if (element) {
-                    const obj = canvas.getObjects().find((o: any) => o.id === element.id)
-                    if (obj && (obj.type === 'textbox' || obj.type === 'text')) {
-                      const maxLength = element.estimatedMaxChars || 200
-                      obj.set('text', smartTruncate(String(content), maxLength))
-                      processedElements++
-                      currentCanvasProcessed = true
+                } else if (trimmedLine.startsWith('"CODE_') && trimmedLine.includes(':') && currentCanvasForParsing) {
+                  const match = trimmedLine.match(/"(CODE_标 \d+)":\s*"([^"]*)"\s*,?/)
+                  if (match) {
+                    const codeKey = match[1]
+                    const codeValue = match[2]
+                    canvasContentForParsing[codeKey] = codeValue
+                    
+                    // 应用到当前画布的元素
+                    const element = codeElementMap.get(codeKey)
+                    if (element) {
+                      const obj = canvas.getObjects().find((o: any) => o.id === element.id)
+                      if (obj && (obj.type === 'textbox' || obj.type === 'text')) {
+                        const maxLength = element.estimatedMaxChars || 200
+                        obj.set('text', smartTruncate(codeValue, maxLength))
+                        processedElements++
+                        console.log(`成功应用 ${codeKey} = "${codeValue}" 到当前画布元素 ${element.id}`)
+                      }
                     }
                   }
-                })
+                }
               }
               
               // 准备所有画布数据，传递给父组件统一处理
-              if (onApplyTemplate) {
-                // 将所有画布数据结构化为适合handleApplyTemplate处理的格式
-                const processedData = {}
-                
-                // 复制原始数据结构
-                Object.keys(jsonData).forEach(key => {
-                  processedData[key] = jsonData[key]
-                })
-                
-                // 调用父组件的模板应用函数，处理其他画布的数据
-                // 注意：这不会影响当前画布，因为我们已经处理过了
+              // 重要：直接传递原始字符串，保留重复键信息
+              if (onApplyTemplate && originalJsonString) {
+                // 调用父组件的模板应用函数，使用原始字符串处理所有画布的数据
                 setTimeout(() => {
-                  onApplyTemplate(JSON.stringify(processedData))
+                  onApplyTemplate(originalJsonString)
                 }, 0)
               }
               
               // 提供用户反馈 - 增强版本
+              // 计算当前画布处理的CODE_标字段数量
+              const currentCanvasCodeCount = Object.keys(canvasContentForParsing).filter(k => k.startsWith('CODE_')).length
+              
               if (processedElements > 0) {
                 // 如果成功填充了元素，明确告知用户
-                message.success(`已自动处理所有画布数据，共识别并分配了 ${totalProcessedFields} 个CODE_标字段到 ${canvasKeys.length} 个画布，当前画布已成功填充 ${processedElements} 个元素`)
+                message.success(`已自动处理所有画布数据，当前画布已成功填充 ${processedElements} 个元素，共识别 ${canvasKeys.length} 个画布`)
                 console.log(`已在当前画布填充 ${processedElements} 个文本元素`)
               } else {
                 // 如果未能填充元素，提供更详细的信息
-                const messageContent = currentCanvasProcessed 
-                  ? `已自动处理所有画布数据，共识别并分配了 ${totalProcessedFields} 个CODE_标字段到 ${canvasKeys.length} 个画布，但当前画布未显示内容`
-                  : `已自动处理所有画布数据，共识别并分配了 ${totalProcessedFields} 个CODE_标字段到 ${canvasKeys.length} 个画布`
-                
-                // 使用警告消息提醒用户
-                message.warning(messageContent)
+                message.warning(`已自动处理所有画布数据，共识别 ${canvasKeys.length} 个画布，但当前画布未显示内容`)
                 console.warn(`当前画布未成功填充任何元素，请检查CODE_标字段与模板是否匹配`)
-                console.warn(`CODE_标字段: ${codeKeys.join(', ')}`)
                 console.warn(`当前画布键: ${currentCanvasKey}`)
               }
+              
+              // 渲染画布
+              canvas.renderAll()
+              
+              // 清空AI结果输入框
+              const aiResultInput = document.getElementById('aiResultInput') as HTMLTextAreaElement
+              if (aiResultInput) {
+                aiResultInput.value = ''
+              }
+              
+              // 对于多画布CODE_标格式的输入，处理完成后直接返回
+              return
             }
             // 如果是单画布数据，则直接处理所有CODE_标字段
             else if (codeKeys.length > 0) {
