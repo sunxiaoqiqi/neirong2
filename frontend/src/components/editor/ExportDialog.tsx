@@ -51,17 +51,40 @@ export default function ExportDialog({
     if (selectedPages.length === 0) {
       return
     }
+    
+    // 防止重复调用
+    if (exporting) {
+      return
+    }
+    
     setExporting(true)
     setProgress(0)
+
+    // 保存导出参数，避免在异步操作中丢失
+    const exportFormat = format
+    const exportPages = [...selectedPages]
+    
+    // 标记是否已经调用过导出，防止重复调用
+    let hasExported = false
 
     // 模拟导出进度
     const interval = setInterval(() => {
       setProgress((prev) => {
         if (prev >= 100) {
           clearInterval(interval)
-          setExporting(false)
-          onExport(format, selectedPages)
-          onCancel()
+          
+          // 确保只调用一次导出
+          if (!hasExported) {
+            hasExported = true
+            setExporting(false)
+            // 先调用导出，再关闭对话框，避免状态更新冲突
+            // 使用 setTimeout 确保状态更新完成后再关闭对话框
+            setTimeout(() => {
+              onExport(exportFormat, exportPages)
+              onCancel()
+            }, 0)
+          }
+          
           return 100
         }
         return prev + 10

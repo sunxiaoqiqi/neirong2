@@ -7,6 +7,7 @@ import materialRoutes from './routes/materialRoutes.js'
 import aiRoutes from './routes/aiRoutes.js'
 import folderRoutes from './routes/folderRoutes.js'
 import tagRoutes from './routes/tagRoutes.js'
+import uploadRoutes from './routes/uploadRoutes.js'
 import { errorHandler } from './middleware/errorHandler.js'
 
 dotenv.config()
@@ -16,8 +17,9 @@ const PORT = process.env.PORT || 3000
 
 // 中间件
 app.use(cors())
-app.use(express.json())
-app.use(express.urlencoded({ extended: true }))
+// 增加请求体大小限制，支持大的 canvasData 和 thumbnailUrl
+app.use(express.json({ limit: '50mb' }))
+app.use(express.urlencoded({ extended: true, limit: '50mb' }))
 
 // 静态文件服务
 app.use('/uploads', express.static('uploads'))
@@ -29,6 +31,7 @@ app.use('/api/materials', materialRoutes)
 app.use('/api/ai', aiRoutes)
 app.use('/api/folders', folderRoutes)
 app.use('/api/tags', tagRoutes)
+app.use('/api/upload', uploadRoutes)
 
 // 健康检查
 app.get('/health', (req, res) => {

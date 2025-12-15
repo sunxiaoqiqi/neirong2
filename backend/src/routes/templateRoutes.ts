@@ -52,22 +52,79 @@ router.post('/', async (req, res) => {
   try {
     const { name, canvasData, tags, thumbnailUrl } = req.body
 
+    console.log('创建模板请求:', { name, canvasDataType: typeof canvasData, canvasDataLength: canvasData?.length, tags, thumbnailUrl })
+
     if (!name) {
       return res.status(400).json({ error: '模版名称不能为空' })
+    }
+
+    // 处理 canvasData：如果已经是字符串，直接使用；否则序列化
+    let canvasDataStr: string | null = null
+    if (canvasData) {
+      if (typeof canvasData === 'string') {
+        canvasDataStr = canvasData
+        console.log('canvasData 是字符串，直接使用，长度:', canvasDataStr.length)
+      } else {
+        canvasDataStr = JSON.stringify(canvasData)
+        console.log('canvasData 是对象，已序列化，长度:', canvasDataStr.length)
+      }
+    }
+
+    // 处理 tags：如果已经是字符串，解析后再序列化；否则直接序列化
+    let tagsStr: string | null = null
+    if (tags) {
+      if (typeof tags === 'string') {
+        try {
+          // 如果已经是 JSON 字符串，直接使用
+          JSON.parse(tags)
+          tagsStr = tags
+        } catch {
+          // 如果不是有效的 JSON，当作普通字符串处理
+          tagsStr = JSON.stringify([tags])
+        }
+      } else {
+        tagsStr = JSON.stringify(tags)
+      }
+    }
+
+    console.log('准备创建模板，数据:', { 
+      name, 
+      canvasDataLength: canvasDataStr?.length, 
+      tagsStr, 
+      thumbnailUrlLength: thumbnailUrl?.length || 0 
+    })
+
+    // 检查数据长度，避免超出数据库限制
+    if (canvasDataStr && canvasDataStr.length > 10000000) {
+      console.warn('canvasData 数据过长，可能超出数据库限制')
     }
 
     const template = await prisma.template.create({
       data: {
         name,
-        canvasData: canvasData ? JSON.stringify(canvasData) : null,
-        tags: tags ? JSON.stringify(tags) : null,
-        thumbnailUrl,
+        canvasData: canvasDataStr,
+        tags: tagsStr,
+        thumbnailUrl: thumbnailUrl && thumbnailUrl.length > 1000000 ? null : thumbnailUrl, // 如果缩略图太长，设为 null
       },
     })
 
+    console.log('模板创建成功，ID:', template.id)
     res.status(201).json(template)
   } catch (error: any) {
-    res.status(500).json({ error: error.message })
+    console.error('创建模板失败:', error)
+    console.error('错误消息:', error.message)
+    console.error('错误代码:', error.code)
+    console.error('错误堆栈:', error.stack)
+    
+    // 提供更详细的错误信息
+    let errorMessage = error.message || '创建模板失败'
+    if (error.code === 'P2002') {
+      errorMessage = '模板名称已存在'
+    } else if (error.code === 'P2003') {
+      errorMessage = '数据库约束错误'
+    }
+    
+    res.status(500).json({ error: errorMessage })
   }
 })
 
