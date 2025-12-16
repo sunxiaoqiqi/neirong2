@@ -306,21 +306,16 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
               size="small"
               icon={<ArrowUpOutlined />}
               onClick={() => {
-                // 确保选中的对象存在
-                if (!textObject) return;
-                // 使用setTimeout确保操作在事件循环的下一个周期执行
+                if (!textObject || !canvas) return;
                 setTimeout(() => {
                   canvas.bringForward(textObject);
-                  // 强制重新计算画布尺寸和渲染
                   canvas.calcOffset();
                   canvas.renderAll();
-                  // 手动触发画布变化事件，确保保存历史记录
                   canvas.fire('object:modified', { target: textObject });
                 }, 0);
               }}
-            >
-              上移
-            </Button>
+            />
+            
             <Button
               size="small"
               icon={<ArrowDownOutlined />}
@@ -448,11 +443,72 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
             danger 
             icon={<DeleteOutlined />}
             onClick={() => {
-              // 删除文字对象
-              canvas.remove(textObject)
-              canvas.renderAll()
-              // 手动触发画布变化事件，确保保存历史记录
-              canvas.fire('object:modified', { target: textObject });
+              try {
+                console.log('【右侧边栏】删除按钮点击 - 文字编辑面板')
+                console.log('文字对象状态检查:', {
+                  exists: !!textObject,
+                  type: textObject?.type,
+                  canvasExists: !!canvas,
+                  activeObject: canvas?.getActiveObject()?.type || '无'
+                })
+                
+                // 确保文字对象和画布都存在
+                if (!textObject || !canvas) {
+                  console.error('无法删除: 文字对象或画布不存在')
+                  message.error('请先选中有效的文字对象')
+                  return
+                }
+                
+                // 确认文字对象是否为当前选中对象
+                const isActive = canvas.getActiveObject() === textObject;
+                console.log('文字对象是否为当前选中对象:', isActive)
+                
+                if (!isActive) {
+                  // 如果不是当前选中对象，先将其设为选中
+                  console.log('设置文字对象为当前选中对象')
+                  canvas.setActiveObject(textObject)
+                  canvas.renderAll()
+                }
+                
+                console.log('开始删除文字对象:', {
+                  type: textObject.type,
+                  id: (textObject as any).id,
+                  left: textObject.left,
+                  top: textObject.top
+                })
+                
+                // 删除文字对象
+                canvas.remove(textObject)
+                console.log('文字对象已从画布移除')
+                
+                // 清除选中状态
+                canvas.discardActiveObject()
+                console.log('画布选中状态已清除')
+                
+                // 强制重新计算画布偏移并渲染
+                canvas.calcOffset()
+                console.log('画布偏移已重新计算')
+                
+                canvas.renderAll()
+                console.log('画布已重新渲染')
+                
+                // 手动触发画布变化事件，确保保存历史记录
+                setTimeout(() => {
+                  console.log('触发object:removed事件 - 文字对象')
+                  canvas.fire('object:removed', { target: textObject });
+                  
+                  // 额外触发onChange事件确保状态更新
+                  setTimeout(() => {
+                    console.log('触发画布变更更新')
+                    // 这里假设外部有监听object:removed事件来处理变更
+                  }, 10);
+                }, 0);
+                
+                message.success('文字已删除')
+              } catch (error) {
+                console.error('删除文字对象时出错:', error)
+                message.error('删除失败，请重试')
+              }
             }}
           >
             删除
@@ -1108,12 +1164,72 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
             danger
             icon={<DeleteOutlined />}
             onClick={() => {
-              // 确保选中的对象存在
-              if (!imageObject || !canvas) return;
-              
-              // 从画布中移除对象
-              canvas.remove(imageObject);
-              canvas.renderAll();
+              try {
+                console.log('【右侧边栏】删除按钮点击 - 图片编辑面板')
+                console.log('图片对象状态检查:', {
+                  exists: !!imageObject,
+                  type: imageObject?.type,
+                  canvasExists: !!canvas,
+                  activeObject: canvas?.getActiveObject()?.type || '无'
+                })
+                
+                // 确保选中的对象存在
+                if (!imageObject || !canvas) {
+                  console.error('无法删除: 图片对象或画布不存在')
+                  message.error('请先选中有效的图片对象')
+                  return;
+                }
+                
+                // 确认图片对象是否为当前选中对象
+                const isActive = canvas.getActiveObject() === imageObject;
+                console.log('图片对象是否为当前选中对象:', isActive)
+                
+                if (!isActive) {
+                  // 如果不是当前选中对象，先将其设为选中
+                  console.log('设置图片对象为当前选中对象')
+                  canvas.setActiveObject(imageObject)
+                  canvas.renderAll()
+                }
+                
+                console.log('开始删除图片对象:', {
+                  type: imageObject.type,
+                  id: (imageObject as any).id,
+                  left: imageObject.left,
+                  top: imageObject.top
+                })
+                
+                // 从画布中移除对象
+                canvas.remove(imageObject);
+                console.log('图片对象已从画布移除')
+                
+                // 清除选中状态
+                canvas.discardActiveObject();
+                console.log('画布选中状态已清除')
+                
+                // 强制重新计算画布偏移并渲染
+                canvas.calcOffset();
+                console.log('画布偏移已重新计算')
+                
+                canvas.renderAll();
+                console.log('画布已重新渲染')
+                
+                // 手动触发画布变化事件，确保保存历史记录
+                setTimeout(() => {
+                  console.log('触发object:removed事件 - 图片对象')
+                  canvas.fire('object:removed', { target: imageObject });
+                  
+                  // 额外触发变更更新
+                  setTimeout(() => {
+                    console.log('触发画布变更更新')
+                    // 这里假设外部有监听object:removed事件来处理变更
+                  }, 10);
+                }, 0);
+                
+                message.success('图片已删除')
+              } catch (error) {
+                console.error('删除图片对象时出错:', error)
+                message.error('删除失败，请重试')
+              }
             }}
           >
             删除
@@ -1876,8 +1992,72 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
             danger 
             icon={<DeleteOutlined />}
             onClick={() => {
-              canvas.remove(selectedObject)
-              canvas.renderAll()
+              try {
+                console.log('【右侧边栏】删除按钮点击 - 图形编辑面板')
+                console.log('图形对象状态检查:', {
+                  exists: !!selectedObject,
+                  type: selectedObject?.type,
+                  canvasExists: !!canvas,
+                  activeObject: canvas?.getActiveObject()?.type || '无'
+                })
+                
+                // 确保选中的对象存在
+                if (!selectedObject || !canvas) {
+                  console.error('无法删除: 图形对象或画布不存在')
+                  message.error('请先选中有效的图形对象')
+                  return
+                }
+                
+                // 确认图形对象是否为当前选中对象
+                const isActive = canvas.getActiveObject() === selectedObject;
+                console.log('图形对象是否为当前选中对象:', isActive)
+                
+                if (!isActive) {
+                  // 如果不是当前选中对象，先将其设为选中
+                  console.log('设置图形对象为当前选中对象')
+                  canvas.setActiveObject(selectedObject)
+                  canvas.renderAll()
+                }
+                
+                console.log('开始删除图形对象:', {
+                  type: selectedObject.type,
+                  id: (selectedObject as any).id,
+                  left: selectedObject.left,
+                  top: selectedObject.top
+                })
+                
+                // 从画布中移除对象
+                canvas.remove(selectedObject)
+                console.log('图形对象已从画布移除')
+                
+                // 清除选中状态
+                canvas.discardActiveObject()
+                console.log('画布选中状态已清除')
+                
+                // 强制重新计算画布偏移并渲染
+                canvas.calcOffset()
+                console.log('画布偏移已重新计算')
+                
+                canvas.renderAll()
+                console.log('画布已重新渲染')
+                
+                // 手动触发画布变化事件，确保保存历史记录
+                setTimeout(() => {
+                  console.log('触发object:removed事件 - 图形对象')
+                  canvas.fire('object:removed', { target: selectedObject });
+                  
+                  // 额外触发变更更新
+                  setTimeout(() => {
+                    console.log('触发画布变更更新')
+                    // 这里假设外部有监听object:removed事件来处理变更
+                  }, 10);
+                }, 0);
+                
+                message.success('图形已删除')
+              } catch (error) {
+                console.error('删除图形对象时出错:', error)
+                message.error('删除失败，请重试')
+              }
             }}
           >
             删除

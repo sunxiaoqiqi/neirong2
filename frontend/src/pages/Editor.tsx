@@ -151,6 +151,13 @@ export default function Editor() {
     return () => {
       canvas.dispose()
       if (thumbTimerRef.current) clearTimeout(thumbTimerRef.current)
+      
+      // 清理画布的键盘事件监听器
+      const keyHandler = (canvas as any)._deleteKeyHandler
+      if (keyHandler) {
+        document.removeEventListener('keydown', keyHandler, true) // 保持与添加时相同的useCapture参数
+        delete (canvas as any)._deleteKeyHandler
+      }
     }
   }, [])
 
@@ -173,6 +180,86 @@ export default function Editor() {
     canvas.on('object:modified', onChange)
     canvas.on('object:removed', onChange)
     canvas.on('text:changed', onChange)
+    
+    // 添加键盘删除事件处理
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 详细的键盘事件日志，包括按键状态和事件目标
+      const target = e.target as HTMLElement
+      console.log('键盘事件触发:', { 
+        key: e.key, 
+        code: e.code,
+        target: target.tagName,
+        isContentEditable: target.isContentEditable,
+        selectedObject: canvas.getActiveObject() ? canvas.getActiveObject().type : '无',
+        drawingMode: canvas.isDrawingMode,
+        eventPhase: e.eventPhase // 记录事件传播阶段
+      })
+      
+      // 检查是否按下了删除键或退格键
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        // 获取当前选中的对象
+        const activeObject = canvas.getActiveObject()
+        
+        // 检查是否是在输入框中按下的键，如果是则不处理
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+          console.log('在输入区域按下删除键，跳过处理')
+          return
+        }
+        
+        // 如果有选中的对象且不是处于文本编辑模式
+        if (activeObject && !canvas.isDrawingMode) {
+          console.log('准备删除对象:', {
+            type: activeObject.type,
+            id: (activeObject as any).id,
+            left: activeObject.left,
+            top: activeObject.top
+          })
+          
+          // 阻止默认行为（如浏览器后退等）
+          e.preventDefault()
+          
+          try {
+            // 删除选中的对象
+            canvas.remove(activeObject)
+            console.log('对象已从画布移除')
+            
+            // 清除选择状态
+            canvas.discardActiveObject()
+            console.log('选中状态已清除')
+            
+            // 强制重新计算画布偏移
+            canvas.calcOffset()
+            console.log('画布偏移已重新计算')
+            
+            // 重新渲染画布
+            canvas.renderAll()
+            console.log('画布已重新渲染')
+            
+            // 触发对象移除事件，确保历史记录更新
+            setTimeout(() => {
+              console.log('触发object:removed事件')
+              canvas.fire('object:removed', { target: activeObject })
+            }, 0)
+            
+            // 手动触发变更处理
+            setTimeout(() => {
+              console.log('调用onChange()更新状态')
+              onChange()
+            }, 10)
+          } catch (error) {
+            console.error('删除对象过程中出错:', error)
+          }
+        } else {
+          console.log('不满足删除条件:', { hasActiveObject: !!activeObject, isDrawingMode: canvas.isDrawingMode })
+        }
+      }
+    }
+    
+    // 添加全局键盘事件监听
+    document.addEventListener('keydown', handleKeyDown, true) // 添加useCapture参数确保事件能被捕获
+    
+    // 保存事件监听器引用，以便在需要时移除
+    ;(canvas as any)._deleteKeyHandler = handleKeyDown
   }
 
   /* =========================
@@ -247,6 +334,13 @@ export default function Editor() {
 
     isApplyingRef.current = true
     setSelectedObject(null)
+    
+    // 清理之前的键盘事件监听器，防止内存泄漏
+    const prevKeyHandler = (canvas as any)._deleteKeyHandler
+    if (prevKeyHandler) {
+      document.removeEventListener('keydown', prevKeyHandler, true) // 保持与添加时相同的useCapture参数
+      delete (canvas as any)._deleteKeyHandler
+    }
 
     canvas.clear()
     canvas.loadFromJSON(parsed, () => {
