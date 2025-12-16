@@ -95,3 +95,20 @@ model AIUsage {
   @@index([createdAt])
 }
 
+model Article {
+  id          Int      @id @default(autoincrement())
+  title       String
+  content     String?  // Markdown 内容
+  htmlContent String?  // 渲染后的 HTML
+  theme       String   @default("default")
+  themeConfig String?  // 主题配置（JSON string）
+  status      String   @default("draft") // draft, published
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+  userId      Int?
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+

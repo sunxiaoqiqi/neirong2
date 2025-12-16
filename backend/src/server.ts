@@ -8,6 +8,7 @@ import aiRoutes from './routes/aiRoutes.js'
 import folderRoutes from './routes/folderRoutes.js'
 import tagRoutes from './routes/tagRoutes.js'
 import uploadRoutes from './routes/uploadRoutes.js'
+import articleRoutes from './routes/articleRoutes.js'
 import { errorHandler } from './middleware/errorHandler.js'
 
 dotenv.config()
@@ -32,6 +33,7 @@ app.use('/api/ai', aiRoutes)
 app.use('/api/folders', folderRoutes)
 app.use('/api/tags', tagRoutes)
 app.use('/api/upload', uploadRoutes)
+app.use('/api/articles', articleRoutes)
 
 // 健康检查
 app.get('/health', (req, res) => {

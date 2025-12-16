@@ -16,6 +16,7 @@ import {
   MoreOutlined,
   CheckOutlined,
   PlusOutlined,
+  WechatOutlined,
 } from '@ant-design/icons'
 import type { Material } from '@/types/material'
 import { materialService } from '@/services/materialService'
@@ -24,6 +25,7 @@ import { templateService } from '@/services/templateService'
 import { fabric } from 'fabric'
 import { testUniqueCodeMatching } from './testUniqueCodeMatching'
 import { useAiApply } from './hooks/useAiApply'
+import ArticleListModal from './ArticleListModal'
 
 const { TextArea } = Input
 const { TabPane } = Tabs
@@ -99,6 +101,7 @@ export default function LeftSidebar({
     onAddImage,
     onApplyTemplate,
     onApplyToCanvas,
+    onSelectArticle,
   }) {
   // 模板相关状态
   const [templateDrawerVisible, setTemplateDrawerVisible] = useState(false)
@@ -113,6 +116,9 @@ export default function LeftSidebar({
   const [textParseDrawerVisible, setTextParseDrawerVisible] = useState(false)
   const [parseText, setParseText] = useState('')
   const [parseLoading, setParseLoading] = useState(false)
+  
+  // 公众号相关状态
+  const [articleListVisible, setArticleListVisible] = useState(false)
   
   // 模板解析相关状态
   const [templateParseDrawerVisible, setTemplateParseDrawerVisible] = useState(false)
@@ -1650,6 +1656,17 @@ export default function LeftSidebar({
           </Button>
         </div>
 
+        {/* 公众号 */}
+        <div>
+          <Button
+            block
+            icon={<WechatOutlined />}
+            onClick={() => setArticleListVisible(true)}
+          >
+            公众号
+          </Button>
+        </div>
+
         {/* 3. 元素 (2.1.3.3) */}
         <div>
           <Button
@@ -2974,6 +2991,18 @@ export default function LeftSidebar({
           </div>
         </div>
       </Drawer>
+
+      {/* 公众号文章列表弹框 */}
+      <ArticleListModal
+        visible={articleListVisible}
+        onClose={() => setArticleListVisible(false)}
+        onSelectArticle={(article, canvasSize) => {
+          if (onSelectArticle) {
+            onSelectArticle(article, canvasSize)
+          }
+          setArticleListVisible(false)
+        }}
+      />
     </div>
   );
 }

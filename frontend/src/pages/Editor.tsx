@@ -14,11 +14,14 @@ import { fabric } from 'fabric'
 import { useEditorStore } from '@/stores/editorStore'
 import { workService } from '@/services/workService'
 import { templateService } from '@/services/templateService'
+import { getThemeStyles } from '@/utils/articleThemes'
 import FileMenu from '@/components/editor/FileMenu'
 import HistoryControls from '@/components/editor/HistoryControls'
 import ExportDialog from '@/components/editor/ExportDialog'
 import LeftSidebar from '@/components/editor/LeftSidebar'
 import RightSidebar from '@/components/editor/RightSidebar'
+import ArticlePaginationModal from '@/components/editor/ArticlePaginationModal'
+import type { Article } from '@/types/article'
 
 /* =========================
    常量
@@ -106,6 +109,9 @@ export default function Editor() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [saveTemplateModalVisible, setSaveTemplateModalVisible] = useState(false)
   const [templateName, setTemplateName] = useState('')
+  const [articlePaginationVisible, setArticlePaginationVisible] = useState(false)
+  const [selectedArticle, setSelectedArticle] = useState<Article | null>(null)
+  const [articleCanvasSize, setArticleCanvasSize] = useState<{ width: number; height: number } | null>(null)
 
   /* ---------- guard ---------- */
   const isApplyingRef = useRef(false)
@@ -525,6 +531,691 @@ export default function Editor() {
       message.error(`添加文字失败: ${error.message || '未知错误'}`)
     }
     console.log('[调试] 文字添加流程结束')
+  }
+
+  /* =========================
+     文章处理
+  ========================= */
+
+  // 处理文章选择
+  const handleSelectArticle = (article: Article, canvasSize?: { width: number; height: number }) => {
+    setSelectedArticle(article)
+    // 如果提供了自定义尺寸，使用自定义尺寸；否则使用默认尺寸
+    setArticleCanvasSize(canvasSize || { width: CANVAS_WIDTH, height: CANVAS_HEIGHT })
+    setArticlePaginationVisible(true)
+  }
+
+  // 解析 HTML 并转换为 Fabric.js 对象
+  const parseHtmlToFabricObjects = (
+    html: string,
+    themeStyles: any,
+    startY: number,
+    maxWidth: number,
+    padding: number
+  ): Array<{ obj: fabric.Object; height: number; nextY: number }> => {
+    console.log('开始解析 HTML:', html.substring(0, 200))
+    const div = document.createElement('div')
+    div.innerHTML = html
+    const objects: Array<{ obj: fabric.Object; height: number; nextY: number }> = []
+    let currentY = startY
+    
+    console.log('解析后的 DOM 结构:', {
+      childrenCount: div.children.length,
+      childNodesCount: div.childNodes.length,
+      textContent: div.textContent?.substring(0, 100),
+      innerHTML: div.innerHTML.substring(0, 200)
+    })
+
+    // 递归处理所有节点，包括文本节点
+    const processNode = (node: Node, depth: number = 0): void => {
+      const indent = '  '.repeat(depth)
+      
+      if (node.nodeType === Node.TEXT_NODE) {
+        const text = node.textContent?.trim()
+        if (text && text.length > 0) {
+          // 文本节点，只在没有块级父元素时才创建对象
+          const parent = node.parentElement
+          const parentTag = parent?.tagName.toLowerCase()
+          if (!parent || !['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'div', 'li'].includes(parentTag || '')) {
+            console.log(`${indent}创建文本对象: "${text.substring(0, 30)}"`)
+            const fontSize = parseInt(String(themeStyles.content.fontSize).replace('px', '')) || 16
+            const lineHeight = themeStyles.container.lineHeight as number || 1.8
+            const textObj = new fabric.Textbox(text, {
+              left: padding,
+              top: currentY,
+              originX: 'left',
+              originY: 'top',
+              fontSize,
+              fontWeight: themeStyles.content.fontWeight as string || 'normal',
+              fill: themeStyles.content.color as string || '#333333',
+              textAlign: 'left',
+              width: maxWidth,
+              fontFamily: themeStyles.container.fontFamily as string || 'Arial',
+              lineHeight: lineHeight,
+            })
+            let height = 0
+            try {
+              height = textObj.calcTextHeight() || fontSize * lineHeight
+            } catch {
+              const charWidth = fontSize * 0.7
+              const estimatedLines = Math.max(1, Math.ceil((text.length * charWidth) / maxWidth))
+              height = estimatedLines * fontSize * lineHeight
+            }
+            const nextY = currentY + height + 16
+            objects.push({ obj: textObj, height, nextY })
+            currentY = nextY
+          }
+        }
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        const element = node as HTMLElement
+        const tagName = element.tagName.toLowerCase()
+        const text = element.textContent?.trim() || ''
+        
+        console.log(`${indent}处理元素: <${tagName}> 文本长度: ${text.length}`)
+
+        // 处理列表元素
+        if (tagName === 'ul' || tagName === 'ol') {
+          // 处理列表，将每个 li 转换为文本行
+          const listItems = element.querySelectorAll('li')
+          listItems.forEach((li, liIndex) => {
+            const itemText = li.textContent?.trim() || ''
+            if (itemText) {
+              const prefix = tagName === 'ul' ? '• ' : `${liIndex + 1}. `
+              const fontSize = parseInt(String(themeStyles.content.fontSize).replace('px', '')) || 16
+              const lineHeight = themeStyles.container.lineHeight as number || 1.8
+              const textObj = new fabric.Textbox(prefix + itemText, {
+                left: padding,
+                top: currentY,
+                originX: 'left',
+                originY: 'top',
+                fontSize,
+                fontWeight: themeStyles.content.fontWeight as string || 'normal',
+                fill: themeStyles.content.color as string || '#333333',
+                textAlign: 'left',
+                width: maxWidth,
+                fontFamily: themeStyles.container.fontFamily as string || 'Arial',
+                lineHeight: lineHeight,
+              })
+              let height = 0
+              try {
+                height = textObj.calcTextHeight() || fontSize * lineHeight
+              } catch {
+                const charWidth = fontSize * 0.7
+                const estimatedLines = Math.max(1, Math.ceil((itemText.length * charWidth) / maxWidth))
+                height = estimatedLines * fontSize * lineHeight
+              }
+              const nextY = currentY + height + 8 // 列表项间距较小
+              objects.push({ obj: textObj, height, nextY })
+              currentY = nextY
+            }
+          })
+        } else if (tagName === 'li') {
+          // 单独的 li 元素（不在 ul/ol 中），也处理
+          const itemText = element.textContent?.trim() || ''
+          if (itemText) {
+            const fontSize = parseInt(String(themeStyles.content.fontSize).replace('px', '')) || 16
+            const lineHeight = themeStyles.container.lineHeight as number || 1.8
+            const textObj = new fabric.Textbox('• ' + itemText, {
+              left: padding,
+              top: currentY,
+              originX: 'left',
+              originY: 'top',
+              fontSize,
+              fontWeight: themeStyles.content.fontWeight as string || 'normal',
+              fill: themeStyles.content.color as string || '#333333',
+              textAlign: 'left',
+              width: maxWidth,
+              fontFamily: themeStyles.container.fontFamily as string || 'Arial',
+              lineHeight: lineHeight,
+            })
+            let height = 0
+            try {
+              height = textObj.calcTextHeight() || fontSize * lineHeight
+            } catch {
+              const charWidth = fontSize * 0.7
+              const estimatedLines = Math.max(1, Math.ceil((itemText.length * charWidth) / maxWidth))
+              height = estimatedLines * fontSize * lineHeight
+            }
+            const nextY = currentY + height + 8
+            objects.push({ obj: textObj, height, nextY })
+            currentY = nextY
+          }
+        } else if (['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tagName)) {
+          // 处理段落和标题，保留格式（加粗、斜体等）
+          const processFormattedText = (el: HTMLElement, isHeading: boolean): void => {
+            const fontSize = isHeading 
+              ? (tagName === 'h1' ? 32 : tagName === 'h2' ? 24 : tagName === 'h3' ? 20 : tagName === 'h4' ? 18 : tagName === 'h5' ? 16 : 14)
+              : parseInt(String(themeStyles.content.fontSize).replace('px', '')) || 16
+            const lineHeight = isHeading ? 1.5 : (themeStyles.container.lineHeight as number || 1.8)
+            const baseFontWeight = isHeading 
+              ? (themeStyles.heading.fontWeight as string || 'bold')
+              : (themeStyles.content.fontWeight as string || 'normal')
+            const baseColor = isHeading 
+              ? (themeStyles.heading.color as string || '#333333')
+              : (themeStyles.content.color as string || '#333333')
+            
+            // 提取文本内容，保留换行和格式信息
+            const extractTextWithFormat = (node: Node): string => {
+              if (node.nodeType === Node.TEXT_NODE) {
+                return node.textContent || ''
+              } else if (node.nodeType === Node.ELEMENT_NODE) {
+                const childEl = node as HTMLElement
+                const childTag = childEl.tagName.toLowerCase()
+                
+                if (childTag === 'br') {
+                  return '\n'
+                } else {
+                  // 递归处理子节点
+                  let result = ''
+                  Array.from(childEl.childNodes).forEach(child => {
+                    result += extractTextWithFormat(child)
+                  })
+                  return result
+                }
+              }
+              return ''
+            }
+            
+            // 提取纯文本（保留换行）
+            let fullText = ''
+            Array.from(el.childNodes).forEach(child => {
+              fullText += extractTextWithFormat(child)
+            })
+            
+            // 如果文本为空，尝试使用 textContent 或 innerText
+            if (!fullText.trim()) {
+              fullText = el.innerText || el.textContent || ''
+            }
+            
+            // 处理 HTML 实体和换行
+            // 将 HTML 实体转换为普通字符
+            const tempDiv = document.createElement('div')
+            tempDiv.innerHTML = fullText
+            fullText = tempDiv.textContent || tempDiv.innerText || fullText
+            
+            // 规范化换行：多个连续换行保留为两个
+            fullText = fullText.replace(/\n{3,}/g, '\n\n')
+            // 移除首尾空白
+            fullText = fullText.trim()
+            
+            if (fullText) {
+              // 检查是否包含格式标签
+              const hasBold = el.querySelector('strong, b')
+              const hasItalic = el.querySelector('em, i')
+              
+              // 确定字体样式
+              let fontWeight = baseFontWeight
+              let fontStyle: 'normal' | 'italic' = 'normal'
+              
+              // 如果包含加粗标签，使用加粗
+              if (hasBold) {
+                fontWeight = 'bold'
+              }
+              
+              // 如果包含斜体标签，使用斜体
+              if (hasItalic) {
+                fontStyle = 'italic'
+              }
+              
+              const textObj = new fabric.Textbox(fullText, {
+                left: padding,
+                top: currentY,
+                originX: 'left',
+                originY: 'top',
+                fontSize,
+                fontWeight,
+                fontStyle,
+                fill: baseColor,
+                textAlign: 'left',
+                width: maxWidth,
+                fontFamily: themeStyles.container.fontFamily as string || 'Arial',
+                lineHeight: lineHeight,
+              })
+              
+              let height = 0
+              try {
+                height = textObj.calcTextHeight() || fontSize * lineHeight
+              } catch {
+                const charWidth = fontSize * 0.7
+                // 计算行数：考虑换行符
+                const lines = fullText.split('\n')
+                const estimatedLines = lines.reduce((sum, line) => {
+                  return sum + Math.max(1, Math.ceil((line.length * charWidth) / maxWidth))
+                }, 0)
+                height = estimatedLines * fontSize * lineHeight
+              }
+              
+              const marginBottom = isHeading
+                ? (themeStyles.heading.marginBottom ? parseInt(String(themeStyles.heading.marginBottom).replace('px', '')) : 12)
+                : (themeStyles.paragraph.marginBottom ? parseInt(String(themeStyles.paragraph.marginBottom).replace('px', '')) : 10)
+              const nextY = currentY + height + marginBottom
+              objects.push({ obj: textObj, height, nextY })
+              currentY = nextY
+            }
+          }
+          
+          if (tagName.startsWith('h')) {
+            // 标题元素
+            processFormattedText(element, true)
+          } else if (tagName === 'p') {
+            // 段落元素
+            processFormattedText(element, false)
+          }
+          
+          // 如果元素为空，递归处理子节点
+          if (!element.textContent?.trim()) {
+            Array.from(element.childNodes).forEach(child => processNode(child, depth + 1))
+          }
+        } else if (tagName === 'div') {
+          // div 容器，递归处理所有子节点
+          console.log(`${indent}div 容器，递归处理子节点 (${element.childNodes.length} 个子节点)`)
+          Array.from(element.childNodes).forEach(child => processNode(child, depth + 1))
+        } else if (['span', 'strong', 'em', 'b', 'i', 'a', 'code', 'sup'].includes(tagName)) {
+          // 内联元素，不单独创建对象，文本会被父元素处理
+          // 递归处理子节点（可能包含文本节点）
+          Array.from(element.childNodes).forEach(child => processNode(child, depth + 1))
+        } else {
+          // 其他元素，如果有文本内容就处理，否则递归处理子节点
+          if (text) {
+            console.log(`${indent}其他元素 <${tagName}> 有文本，创建对象`)
+            const fontSize = parseInt(String(themeStyles.content.fontSize).replace('px', '')) || 16
+            const lineHeight = themeStyles.container.lineHeight as number || 1.8
+            const textObj = new fabric.Textbox(text, {
+              left: padding,
+              top: currentY,
+              originX: 'left',
+              originY: 'top',
+              fontSize,
+              fontWeight: themeStyles.content.fontWeight as string || 'normal',
+              fill: themeStyles.content.color as string || '#333333',
+              textAlign: 'left',
+              width: maxWidth,
+              fontFamily: themeStyles.container.fontFamily as string || 'Arial',
+              lineHeight: lineHeight,
+            })
+            let height = 0
+            try {
+              height = textObj.calcTextHeight() || fontSize * lineHeight
+            } catch {
+              const charWidth = fontSize * 0.7
+              const estimatedLines = Math.max(1, Math.ceil((text.length * charWidth) / maxWidth))
+              height = estimatedLines * fontSize * lineHeight
+            }
+            const nextY = currentY + height + 10
+            objects.push({ obj: textObj, height, nextY })
+            currentY = nextY
+          } else {
+            // 递归处理子节点
+            console.log(`${indent}其他元素 <${tagName}> 无文本，递归处理子节点`)
+            Array.from(element.childNodes).forEach(child => processNode(child, depth + 1))
+          }
+        }
+      }
+    }
+
+    // 处理所有节点（包括文本节点和元素节点）
+    console.log('开始处理节点，子节点数量:', div.childNodes.length)
+    Array.from(div.childNodes).forEach(node => processNode(node, 0))
+    
+    console.log(`处理节点后得到 ${objects.length} 个对象`)
+    
+    // 如果处理后没有对象，尝试直接提取文本
+    if (objects.length === 0 && div.textContent?.trim()) {
+      console.log('没有解析到对象，使用纯文本:', div.textContent.substring(0, 100))
+      const text = div.textContent.trim()
+      const fontSize = parseInt(String(themeStyles.content.fontSize).replace('px', '')) || 16
+      const lineHeight = themeStyles.container.lineHeight as number || 1.8
+      const textObj = new fabric.Textbox(text, {
+        left: padding,
+        top: currentY,
+        originX: 'left',
+        originY: 'top',
+        fontSize,
+        fontWeight: themeStyles.content.fontWeight as string || 'normal',
+        fill: themeStyles.content.color as string || '#333333',
+        textAlign: 'left',
+        width: maxWidth,
+        fontFamily: themeStyles.container.fontFamily as string || 'Arial',
+        lineHeight: lineHeight,
+      })
+      let height = 0
+      try {
+        height = textObj.calcTextHeight() || fontSize * lineHeight
+      } catch {
+        const charWidth = fontSize * 0.7
+        const estimatedLines = Math.max(1, Math.ceil((text.length * charWidth) / maxWidth))
+        height = estimatedLines * fontSize * lineHeight
+      }
+      const nextY = currentY + height + 16
+      objects.push({ obj: textObj, height, nextY })
+    }
+
+    console.log(`parseHtmlToFabricObjects 返回 ${objects.length} 个对象:`, objects.map(o => ({
+      text: (o.obj as any).text?.substring(0, 30),
+      type: o.obj.type
+    })))
+    return objects
+  }
+
+  // 将文章内容应用到画布
+  const applyArticleToCanvas = async (
+    pages: Array<{ content: string; htmlContent?: string; pageIndex: number }>,
+    article: Article
+  ) => {
+    const canvas = canvasRef.current
+    if (!canvas) {
+      message.error('画布未初始化')
+      return
+    }
+
+    try {
+      // 确保有足够的画布页面
+      const neededPages = pages.length
+      const currentPageCount = pagesRef.current.length
+
+      // 如果需要的页面数大于当前页面数，创建新页面
+      if (neededPages > currentPageCount) {
+        const newPages = Array(neededPages - currentPageCount)
+          .fill(null)
+          .map(() => createEmptyPage())
+        
+        setPages(prev => [...prev, ...newPages])
+        // 等待状态更新
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+
+      // 获取主题样式
+      const themeStyles = getThemeStyles(article.theme || 'default')
+      const titleFontSize = parseInt(themeStyles.title.fontSize as string) || 24
+      const contentFontSize = parseInt(themeStyles.content.fontSize as string) || 16
+      const lineHeight = themeStyles.container.lineHeight as number || 1.8
+
+      // 为每个页面应用内容
+      for (let i = 0; i < pages.length; i++) {
+        const pageData = pages[i]
+        
+        // 切换到对应页面
+        if (i !== currentPageIndexRef.current) {
+          // 先保存当前页面
+          console.log(`从页面 ${currentPageIndexRef.current} 切换到页面 ${i}`)
+          syncCanvasToPage(false, true)
+          // 切换到目标页面
+          const prevIndex = currentPageIndexRef.current
+          currentPageIndexRef.current = i
+          setCurrentPageIndex(i)
+          // 等待状态更新
+          await new Promise(resolve => setTimeout(resolve, 100))
+          
+          // 验证切换是否成功
+          if (currentPageIndexRef.current !== i) {
+            console.error(`页面切换失败！期望: ${i}, 实际: ${currentPageIndexRef.current}`)
+            currentPageIndexRef.current = i
+          }
+          
+          console.log(`已切换到页面 ${i}, 页面 ID: ${pagesRef.current[i]?.id}`)
+          
+          // 注意：这里不调用 renderPageToCanvas，因为我们要直接操作画布添加新内容
+          // 只需要确保画布引用已更新即可
+        } else {
+          console.log(`已在页面 ${i}，无需切换`)
+        }
+
+        const currentCanvas = canvasRef.current
+        if (!currentCanvas) {
+          console.error(`页面 ${i}: 画布未初始化`)
+          continue
+        }
+
+        console.log(`页面 ${i}: 开始处理，画布对象数量: ${currentCanvas.getObjects().length}`)
+
+        // 清空当前画布
+        currentCanvas.clear()
+        console.log(`页面 ${i}: 画布已清空`)
+
+        // 设置画布背景色
+        currentCanvas.setBackgroundColor(
+          themeStyles.container.backgroundColor as string || '#ffffff',
+          () => currentCanvas.renderAll()
+        )
+        
+        console.log(`页面 ${i}: 画布已清空，准备添加内容`)
+
+        // 添加标题（只在第一页添加）
+        if (i === 0) {
+          const titleText = new fabric.Textbox(article.title, {
+            left: CANVAS_WIDTH / 2,
+            top: 60,
+            originX: 'center',
+            originY: 'top',
+            fontSize: titleFontSize,
+            fontWeight: themeStyles.title.fontWeight as string || 'bold',
+            fill: themeStyles.title.color as string || '#333333',
+            textAlign: 'center',
+            width: CANVAS_WIDTH - 80,
+            fontFamily: themeStyles.container.fontFamily as string || 'Arial',
+          })
+          currentCanvas.add(titleText)
+        }
+
+        // 添加内容
+        let currentY = i === 0 ? 120 : 60 // 第一页从标题下方开始，其他页从顶部开始
+        const padding = 40
+        const maxWidth = CANVAS_WIDTH - padding * 2
+
+        // 如果有 HTML 内容，解析 HTML；否则使用纯文本
+        if (pageData.htmlContent) {
+          console.log('解析 HTML 内容 (长度:', pageData.htmlContent.length, '):', pageData.htmlContent.substring(0, 300))
+          const fabricObjects = parseHtmlToFabricObjects(
+            pageData.htmlContent,
+            themeStyles,
+            currentY,
+            maxWidth,
+            padding
+          )
+          
+          console.log(`解析到 ${fabricObjects.length} 个对象:`, fabricObjects.map((o, idx) => ({
+            index: idx,
+            text: (o.obj as any).text?.substring(0, 50) || '空文本',
+            type: o.obj.type,
+            height: o.height
+          })))
+
+          if (fabricObjects.length === 0) {
+            console.warn('警告：HTML 解析后没有对象，尝试使用纯文本')
+            // 如果 HTML 解析失败，回退到纯文本
+            const paragraphs = pageData.content.split(/\n\n+/).filter(p => p.trim())
+            for (const para of paragraphs) {
+              if (!para.trim()) continue
+              const textObj = new fabric.Textbox(para, {
+                left: padding,
+                top: currentY,
+                originX: 'left',
+                originY: 'top',
+                fontSize: contentFontSize,
+                fontWeight: themeStyles.content.fontWeight as string || 'normal',
+                fill: themeStyles.content.color as string || '#333333',
+                textAlign: 'left',
+                width: maxWidth,
+                fontFamily: themeStyles.container.fontFamily as string || 'Arial',
+                lineHeight: lineHeight,
+              })
+              const textHeight = textObj.calcTextHeight() || contentFontSize * lineHeight * 2
+              currentCanvas.add(textObj)
+              currentY += textHeight + 20
+              if (currentY > CANVAS_HEIGHT - 40) break
+            }
+          } else {
+            console.log(`准备添加 ${fabricObjects.length} 个对象到画布`)
+            
+            // 先创建所有对象，设置初始位置（在画布外，避免闪烁）
+            const objectsToAdd: Array<{ obj: fabric.Object; initialTop: number }> = []
+            for (const { obj } of fabricObjects) {
+              obj.set('left', padding)
+              obj.set('top', -1000) // 先放在画布外
+              objectsToAdd.push({ obj, initialTop: currentY })
+              currentCanvas.add(obj)
+              console.log(`已添加对象到画布: "${(obj as any).text?.substring(0, 30)}"`)
+            }
+            
+            console.log(`画布对象数量: ${currentCanvas.getObjects().length}`)
+            
+            // 渲染一次以让 Fabric.js 计算实际尺寸
+            currentCanvas.renderAll()
+            
+            // 根据实际高度调整位置
+            let actualCurrentY = currentY
+            for (let idx = 0; idx < objectsToAdd.length; idx++) {
+              const { obj, initialTop } = objectsToAdd[idx]
+              
+              // 获取实际高度
+              let actualHeight = 0
+              try {
+                actualHeight = obj.calcTextHeight() || 0
+                console.log(`对象 ${idx} calcTextHeight: ${actualHeight}`)
+              } catch (e) {
+                console.warn(`对象 ${idx} calcTextHeight 失败:`, e)
+                // 如果 calcTextHeight 失败，尝试其他方法
+                actualHeight = (obj as any).height || 0
+              }
+              
+              // 如果高度为0或无效，使用估算值
+              if (actualHeight === 0 || isNaN(actualHeight)) {
+                const fontSize = (obj as any).fontSize || 16
+                const lineHeight = (obj as any).lineHeight || 1.8
+                const text = (obj as any).text || ''
+                const charWidth = fontSize * 0.7
+                const estimatedLines = Math.max(1, Math.ceil((text.length * charWidth) / maxWidth))
+                actualHeight = estimatedLines * fontSize * lineHeight
+                console.log(`对象 ${idx} 使用估算高度: ${actualHeight} (字体: ${fontSize}, 文本长度: ${text.length})`)
+              }
+              
+              console.log(`对象 ${idx}: 文本="${(obj as any).text?.substring(0, 30)}", 高度=${actualHeight}, 位置=${actualCurrentY}, left=${obj.left}`)
+              
+              // 设置正确的位置
+              obj.set({
+                top: actualCurrentY,
+                left: padding,
+                visible: true
+              })
+              
+              // 强制更新对象
+              obj.setCoords()
+              
+              // 计算下一个对象的位置（减少间距，从16改为10）
+              const marginBottom = idx < objectsToAdd.length - 1 ? 10 : 0
+              actualCurrentY = actualCurrentY + actualHeight + marginBottom
+
+              // 如果超出画布高度，移除后续对象
+              if (actualCurrentY > CANVAS_HEIGHT - 40) {
+                console.log(`位置 ${actualCurrentY} 超出画布高度 ${CANVAS_HEIGHT - 40}，移除后续对象`)
+                for (let j = idx + 1; j < objectsToAdd.length; j++) {
+                  currentCanvas.remove(objectsToAdd[j].obj)
+                }
+                break
+              }
+            }
+            
+            console.log(`最终画布对象数量: ${currentCanvas.getObjects().length}`)
+            console.log(`最终画布对象列表:`, currentCanvas.getObjects().map((o: any, i: number) => ({
+              index: i,
+              type: o.type,
+              text: o.text?.substring(0, 30),
+              top: o.top,
+              left: o.left,
+              visible: o.visible
+            })))
+            
+            // 最终渲染
+            currentCanvas.renderAll()
+            console.log(`页面 ${i} 渲染完成`)
+          }
+        } else {
+          // 使用纯文本（向后兼容）
+          const paragraphs = pageData.content.split(/\n\n+/).filter(p => p.trim())
+
+          for (const para of paragraphs) {
+            if (!para.trim()) continue
+
+            const textObj = new fabric.Textbox(para, {
+              left: padding,
+              top: currentY,
+              originX: 'left',
+              originY: 'top',
+              fontSize: contentFontSize,
+              fontWeight: themeStyles.content.fontWeight as string || 'normal',
+              fill: themeStyles.content.color as string || '#333333',
+              textAlign: 'left',
+              width: maxWidth,
+              fontFamily: themeStyles.container.fontFamily as string || 'Arial',
+              lineHeight: lineHeight,
+            })
+
+            // 计算文本高度
+              const textHeight = textObj.calcTextHeight() || contentFontSize * lineHeight * 2
+              currentCanvas.add(textObj)
+              currentY += textHeight + 10 // 减少段落间距，从20改为10
+
+            // 如果超出画布高度，停止添加
+            if (currentY > CANVAS_HEIGHT - 40) {
+              break
+            }
+          }
+        }
+
+        // 保存当前页面（确保所有对象都被保存）
+        console.log(`页面 ${i}: 保存前，画布对象数量: ${currentCanvas.getObjects().length}`)
+        console.log(`页面 ${i}: 当前页面索引 ref: ${currentPageIndexRef.current}, 目标索引: ${i}`)
+        
+        // 确保 currentPageIndexRef 指向正确的页面
+        if (currentPageIndexRef.current !== i) {
+          console.warn(`页面索引不匹配！ref=${currentPageIndexRef.current}, 目标=${i}`)
+          currentPageIndexRef.current = i
+        }
+        
+        syncCanvasToPage(true, true)
+        currentCanvas.renderAll()
+        
+        // 验证保存是否成功
+        const savedPage = pagesRef.current[i]
+        if (savedPage) {
+          const savedJson = safeParse(savedPage.json)
+          const savedObjects = savedJson?.objects || []
+          console.log(`页面 ${i}: 保存后，JSON 中的对象数量: ${savedObjects.length}`)
+          console.log(`页面 ${i}: 保存的页面 ID: ${savedPage.id}`)
+          
+          // 验证保存的对象类型
+          if (savedObjects.length > 0) {
+            console.log(`页面 ${i}: 第一个对象类型: ${savedObjects[0].type}, 文本: ${(savedObjects[0] as any).text?.substring(0, 30)}`)
+          }
+        } else {
+          console.error(`页面 ${i}: 保存失败，页面不存在`)
+        }
+      }
+
+      // 切换回第一页并渲染
+      if (pages.length > 0) {
+        // 先保存当前页面（如果还在其他页面）
+        syncCanvasToPage(false, true)
+        // 切换到第一页
+        currentPageIndexRef.current = 0
+        setCurrentPageIndex(0)
+        // 等待状态更新
+        await new Promise(resolve => setTimeout(resolve, 100))
+        // 渲染第一个画布
+        const firstPage = pagesRef.current[0]
+        if (firstPage) {
+          renderPageToCanvas(firstPage)
+          await new Promise(resolve => setTimeout(resolve, 100))
+        }
+      }
+
+      message.success(`文章已成功应用到 ${pages.length} 个画布`)
+      setArticlePaginationVisible(false)
+      setSelectedArticle(null)
+    } catch (error: any) {
+      console.error('应用文章到画布失败:', error)
+      message.error('应用文章失败: ' + (error.message || '未知错误'))
+    }
   }
 
   /* =========================
@@ -1170,6 +1861,7 @@ export default function Editor() {
           onAddText={addText}
           onAddImage={addImage}
           onApplyTemplate={handleApplyTemplate}
+          onSelectArticle={handleSelectArticle}
           onApplyToCanvas={(canvasIndex, canvasData, canvasCodeMap, smartTruncate) => {
             // 返回 Promise，以便串行处理
             return new Promise<void>((resolve) => {
@@ -1421,6 +2113,24 @@ export default function Editor() {
         onCancel={() => setExportVisible(false)}
         onExport={handleExport}
         pageCount={pages.length}
+      />
+
+      {/* 文章分页对话框 */}
+      <ArticlePaginationModal
+        visible={articlePaginationVisible}
+        article={selectedArticle}
+        onCancel={() => {
+          setArticlePaginationVisible(false)
+          setSelectedArticle(null)
+          setArticleCanvasSize(null)
+        }}
+        onConfirm={(pages) => {
+          if (selectedArticle) {
+            applyArticleToCanvas(pages, selectedArticle)
+          }
+        }}
+        canvasWidth={articleCanvasSize?.width || CANVAS_WIDTH}
+        canvasHeight={articleCanvasSize?.height || CANVAS_HEIGHT}
       />
 
       {/* 保存命名 */}
