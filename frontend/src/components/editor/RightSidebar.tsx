@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Button, InputNumber, Input, Select, Slider, Space, Divider, Radio, Modal, message } from 'antd'
+import { Button, InputNumber, Input, Select, Slider, Space, Divider, Radio, Modal, message, Switch } from 'antd'
 import {
   ArrowUpOutlined,
   ArrowDownOutlined,
@@ -10,6 +10,8 @@ import {
   CopyOutlined,
   DeleteOutlined,
   FormatPainterOutlined,
+  PlusOutlined,
+  MinusOutlined,
 } from '@ant-design/icons'
 import { fabric } from 'fabric'
 import ColorPickerWithEyeDropper from './ColorPickerWithEyeDropper'
@@ -20,11 +22,27 @@ interface RightSidebarProps {
   onEnterCropMode?: (target: fabric.Object) => void
   onEnterMagicWandMode?: (target: fabric.Object) => void
   onEnterEraseMode?: (target: fabric.Object) => void
+  zoom?: number
+  onZoomChange?: (zoom: number) => void
 }
 
-export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, onEnterMagicWandMode, onEnterEraseMode }: RightSidebarProps) {
+export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, onEnterMagicWandMode, onEnterEraseMode, zoom = 1, onZoomChange }: RightSidebarProps) {
   // 所有Hooks必须在组件顶层调用
-  const [activePanel, setActivePanel] = useState<'canvas' | 'text' | 'image' | 'shape' | null>(null)
+  // 面板状态
+  const [activePanel, setActivePanel] = useState<'canvas' | 'text' | 'image' | 'shape' | null>(null);
+  
+  // 新增的文字属性状态管理钩子
+  const [lineHeight, setLineHeight] = useState<number>(1.2);
+  const [letterSpacing, setLetterSpacing] = useState<number>(0);
+  
+  // 当选中文字对象变化时更新文字属性状态
+  useEffect(() => {
+    if (activePanel === 'text' && selectedObject && (selectedObject.type === 'textbox' || selectedObject.type === 'text')) {
+      const textObject = selectedObject as fabric.Textbox;
+      setLineHeight(textObject.lineHeight || 1.2);
+      setLetterSpacing(textObject.charSpacing || 0);
+    }
+  }, [activePanel, selectedObject]);
   
   // 文字编辑状态
   const [fontSize, setFontSize] = useState(16)
@@ -146,8 +164,57 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
   // 画板编辑面板
   if (activePanel === 'canvas' || !selectedObject) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-4 w-full overflow-x-hidden">
         <div className="font-semibold text-text-primary">画板编辑</div>
+        
+        {/* 缩放控制 */}
+        {onZoomChange && (
+          <div className="space-y-2">
+            <div className="text-sm text-text-secondary mb-2">画布缩放</div>
+            <div className="flex items-center gap-2">
+              <Button 
+                icon={<MinusOutlined />}
+                onClick={() => {
+                  const newZoom = Math.max(0.1, zoom - 0.1)
+                  onZoomChange(newZoom)
+                }}
+                disabled={zoom <= 0.1}
+              />
+              <InputNumber
+                value={Math.round(zoom * 100)}
+                min={10}
+                max={500}
+                formatter={(value) => `${value}%`}
+                parser={(value) => parseFloat(value?.replace('%', '') || '100') / 100}
+                onChange={(value) => {
+                  if (value !== null) {
+                    const newZoom = Math.max(0.1, Math.min(5, value / 100))
+                    onZoomChange(newZoom)
+                  }
+                }}
+                style={{ flex: 1 }}
+              />
+              <Button 
+                icon={<PlusOutlined />}
+                onClick={() => {
+                  const newZoom = Math.min(5, zoom + 0.1)
+                  onZoomChange(newZoom)
+                }}
+                disabled={zoom >= 5}
+              />
+            </div>
+            <Button 
+              block 
+              size="small"
+              onClick={() => {
+                onZoomChange(1)
+              }}
+            >
+              重置为 100%
+            </Button>
+          </div>
+        )}
+        
         <div className="space-y-2">
           <Button block icon={<FormatPainterOutlined />}>
             格式刷
@@ -216,15 +283,20 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
   // 文字编辑面板
   if (activePanel === 'text' && (selectedObject.type === 'textbox' || selectedObject.type === 'text')) {
     const textObject = selectedObject as fabric.Textbox
+    
+    // 获取文字类型（如果有设置）
+    const textType = (textObject as any).__type || '普通文字';
 
     const updateText = (updates: Partial<fabric.ITextboxOptions>) => {
       textObject.set(updates)
       canvas.renderAll()
+      // 手动触发画布变化事件，确保保存历史记录
+      canvas.fire('object:modified', { target: textObject });
     }
 
     return (
-      <div className="space-y-4 max-h-[calc(100vh-200px)] overflow-y-auto">
-        <div className="font-semibold text-text-primary">文字编辑</div>
+      <div className="space-y-4 max-h-[calc(100vh-200px)] overflow-y-auto overflow-x-hidden w-full">
+        <div className="font-semibold text-text-primary">文字编辑 ({textType})</div>
 
         {/* 图层顺序 */}
         <div>
@@ -340,6 +412,7 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
             onClick={() => {
               textObject.set({ selectable: !textObject.selectable, evented: !textObject.evented })
               canvas.renderAll()
+              canvas.fire('object:modified', { target: textObject });
             }}
           >
             {textObject.selectable ? '锁定' : '解锁'}
@@ -418,6 +491,44 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                 const newSize = value || 16
                 setFontSize(newSize)
                 updateText({ fontSize: newSize })
+              }}
+              formatter={(value) => `${value}px`}
+            />
+          </Space.Compact>
+        </div>
+
+        {/* 新增：行高 */}
+        <div>
+          <div className="mb-2 text-sm text-text-secondary">行高</div>
+          <Space.Compact style={{ width: '100%' }}>
+            <InputNumber
+              style={{ flex: 1 }}
+              min={0.5}
+              max={3.0}
+              step={0.1}
+              value={lineHeight}
+              onChange={(value) => {
+                const newLineHeight = value || 1.2
+                setLineHeight(newLineHeight)
+                updateText({ lineHeight: newLineHeight })
+              }}
+            />
+          </Space.Compact>
+        </div>
+
+        {/* 新增：字间距 */}
+        <div>
+          <div className="mb-2 text-sm text-text-secondary">字间距</div>
+          <Space.Compact style={{ width: '100%' }}>
+            <InputNumber
+              style={{ flex: 1 }}
+              min={-50}
+              max={100}
+              value={letterSpacing}
+              onChange={(value) => {
+                const newLetterSpacing = value || 0
+                setLetterSpacing(newLetterSpacing)
+                updateText({ charSpacing: newLetterSpacing })
               }}
               formatter={(value) => `${value}px`}
             />
@@ -601,6 +712,192 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
               </Space.Compact>
           </Space>
         </div>
+        
+        {/* 新增：变形文字特殊参数控制 */}
+        {(textType === 'transform' || (textObject as any).__config?.transform) && (
+          <>
+            <Divider className="my-2" />
+            <div className="text-sm font-medium text-text-primary">变形参数</div>
+            
+            <div>
+              <div className="mb-2 text-sm text-text-secondary">X轴倾斜</div>
+              <Space.Compact style={{ width: '100%' }}>
+                <InputNumber
+                  style={{ flex: 1 }}
+                  min={-45}
+                  max={45}
+                  value={(textObject as any).skewX || 0}
+                  onChange={(value) => {
+                    updateText({ skewX: value || 0 })
+                  }}
+                  formatter={(value) => `${value}°`}
+                />
+              </Space.Compact>
+            </div>
+            
+            <div>
+              <div className="mb-2 text-sm text-text-secondary">Y轴倾斜</div>
+              <Space.Compact style={{ width: '100%' }}>
+                <InputNumber
+                  style={{ flex: 1 }}
+                  min={-45}
+                  max={45}
+                  value={(textObject as any).skewY || 0}
+                  onChange={(value) => {
+                    updateText({ skewY: value || 0 })
+                  }}
+                  formatter={(value) => `${value}°`}
+                />
+              </Space.Compact>
+            </div>
+            
+            <div>
+              <div className="mb-2 text-sm text-text-secondary">X轴缩放</div>
+              <Space.Compact style={{ width: '100%' }}>
+                <InputNumber
+                  style={{ flex: 1 }}
+                  min={0.1}
+                  max={3.0}
+                  step={0.1}
+                  value={(textObject as any).scaleX || 1}
+                  onChange={(value) => {
+                    updateText({ scaleX: value || 1 })
+                  }}
+                />
+              </Space.Compact>
+            </div>
+            
+            <div>
+              <div className="mb-2 text-sm text-text-secondary">Y轴缩放</div>
+              <Space.Compact style={{ width: '100%' }}>
+                <InputNumber
+                  style={{ flex: 1 }}
+                  min={0.1}
+                  max={3.0}
+                  step={0.1}
+                  value={(textObject as any).scaleY || 1}
+                  onChange={(value) => {
+                    updateText({ scaleY: value || 1 })
+                  }}
+                />
+              </Space.Compact>
+            </div>
+          </>
+        )}
+        
+        {/* 新增：3D文字特殊参数控制 */}
+        {(textType === '3d' || (textObject as any).__config?.threeD) && (
+          <>
+            <Divider className="my-2" />
+            <div className="text-sm font-medium text-text-primary">3D参数</div>
+            
+            <div>
+              <div className="mb-2 text-sm text-text-secondary">文字厚度</div>
+              <Space.Compact style={{ width: '100%' }}>
+                <InputNumber
+                  style={{ flex: 1 }}
+                  min={1}
+                  max={50}
+                  value={(textObject as any).__config?.threeD?.depth || 8}
+                  onChange={(value) => {
+                    // 注意：这里只能更新配置信息，实际3D效果可能需要额外的渲染处理
+                    if (!(textObject as any).__config) {
+                      (textObject as any).__config = { threeD: {} };
+                    }
+                    if (!(textObject as any).__config.threeD) {
+                      (textObject as any).__config.threeD = {};
+                    }
+                    (textObject as any).__config.threeD.depth = value;
+                    // 这里可以添加实际应用3D效果的代码
+                    canvas.renderAll();
+                    canvas.fire('object:modified', { target: textObject });
+                  }}
+                  formatter={(value) => `${value}px`}
+                />
+              </Space.Compact>
+            </div>
+            
+            <div>
+              <div className="mb-2 text-sm text-text-secondary">X轴旋转</div>
+              <Space.Compact style={{ width: '100%' }}>
+                <InputNumber
+                  style={{ flex: 1 }}
+                  min={-90}
+                  max={90}
+                  value={(textObject as any).__config?.threeD?.rotateX || 15}
+                  onChange={(value) => {
+                    if (!(textObject as any).__config) {
+                      (textObject as any).__config = { threeD: {} };
+                    }
+                    if (!(textObject as any).__config.threeD) {
+                      (textObject as any).__config.threeD = {};
+                    }
+                    (textObject as any).__config.threeD.rotateX = value;
+                    canvas.renderAll();
+                    canvas.fire('object:modified', { target: textObject });
+                  }}
+                  formatter={(value) => `${value}°`}
+                />
+              </Space.Compact>
+            </div>
+            
+            <div>
+              <div className="mb-2 text-sm text-text-secondary">Y轴旋转</div>
+              <Space.Compact style={{ width: '100%' }}>
+                <InputNumber
+                  style={{ flex: 1 }}
+                  min={-180}
+                  max={180}
+                  value={(textObject as any).__config?.threeD?.rotateY || 0}
+                  onChange={(value) => {
+                    if (!(textObject as any).__config) {
+                      (textObject as any).__config = { threeD: {} };
+                    }
+                    if (!(textObject as any).__config.threeD) {
+                      (textObject as any).__config.threeD = {};
+                    }
+                    (textObject as any).__config.threeD.rotateY = value;
+                    canvas.renderAll();
+                    canvas.fire('object:modified', { target: textObject });
+                  }}
+                  formatter={(value) => `${value}°`}
+                />
+              </Space.Compact>
+            </div>
+            
+            <div>
+              <div className="mb-2 text-sm text-text-secondary">显示阴影</div>
+              <Switch
+                checked={(textObject as any).__config?.threeD?.shadow?.show ?? true}
+                onChange={(checked) => {
+                  if (!(textObject as any).__config) {
+                    (textObject as any).__config = { threeD: {} };
+                  }
+                  if (!(textObject as any).__config.threeD) {
+                    (textObject as any).__config.threeD = {};
+                  }
+                  if (!(textObject as any).__config.threeD.shadow) {
+                    (textObject as any).__config.threeD.shadow = {};
+                  }
+                  (textObject as any).__config.threeD.shadow.show = checked;
+                  // 应用阴影效果
+                  if (checked) {
+                    updateText({
+                      shadow: new fabric.Shadow({
+                        color: '#00000033',
+                        blur: 10,
+                        offsetX: 5,
+                        offsetY: 5
+                      })
+                    });
+                  } else {
+                    updateText({ shadow: null });
+                  }
+                }}
+              />
+            </div>
+          </>
+        )}
       </div>
     )
   }
@@ -615,7 +912,7 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
     }
 
     return (
-      <div className="space-y-4 max-h-[calc(100vh-200px)] overflow-y-auto">
+      <div className="space-y-4 max-h-[calc(100vh-200px)] overflow-y-auto overflow-x-hidden w-full">
         <div className="font-semibold text-text-primary">图片编辑</div>
 
         {/* 图层顺序 */}
@@ -1430,7 +1727,7 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
     }
 
     return (
-      <div className="space-y-4 max-h-[calc(100vh-200px)] overflow-y-auto">
+      <div className="space-y-4 max-h-[calc(100vh-200px)] overflow-y-auto overflow-x-hidden w-full">
         <div className="font-semibold text-text-primary">图形编辑</div>
 
         {/* 图层顺序 */}

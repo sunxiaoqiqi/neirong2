@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Button, Drawer, Input, Upload, message, Modal, Space, Tabs, Select, Slider, Collapse, Tooltip } from 'antd'
+import { Button, Drawer, Input, Upload, message, Modal, Space, Tabs, Select, Slider, Collapse, Tooltip, Tag, Card, Dropdown, Badge, Empty } from 'antd'
 import ColorPickerWithEyeDropper from './ColorPickerWithEyeDropper'
 import {
   FileImageOutlined,
@@ -12,7 +12,13 @@ import {
   BarChartOutlined,
   CopyOutlined,
   EditOutlined,
+  TagOutlined,
+  MoreOutlined,
+  CheckOutlined,
+  PlusOutlined,
 } from '@ant-design/icons'
+import type { Material } from '@/types/material'
+import { materialService } from '@/services/materialService'
 import { aiService } from '@/services/aiService'
 import { templateService } from '@/services/templateService'
 import { fabric } from 'fabric'
@@ -351,7 +357,9 @@ export default function LeftSidebar({
     prompt += `  "CODE_标 2": "第二个画布中第二个文本元素的内容",\n`
     // 以此类推，可以有更多画布
     prompt += `}\n\n`
-    prompt += `注意：每个canvasX字段后应跟随对应的CODE_标数据，用于填充该画布上的文本元素。\n\n`
+    // 计算每个画布的 CODE_标 数量
+    const codeCountPerCanvas = textCount || (details?.text?.length || 0)
+    prompt += `###注意：每个canvasX字段后应跟随对应的CODE_标数据，用于填充该画布上的文本元素。每个canvas的CODE_标个数为 ${codeCountPerCanvas} 个（等于【逐段文字详细要求】中的文本元素总数）。\n\n`
     
     // 添加文字结构要求
     prompt += `【精确匹配要求】\n`
@@ -560,23 +568,287 @@ export default function LeftSidebar({
     { label: '从右下到左上', value: 'to top left', angle: 225 },
   ]
 
-  // 上传图片
-  const handleUploadImage = async (file: File) => {
+  // 资源库相关状态
+  const [imageGallery, setImageGallery] = useState<Material[]>([])
+  const [loading, setLoading] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [searchKeyword, setSearchKeyword] = useState('')
+  const [selectedTag, setSelectedTag] = useState<string>('全部')
+  const [editingMaterial, setEditingMaterial] = useState<Material | null>(null)
+  const [showRenameModal, setShowRenameModal] = useState(false)
+  const [showTagModal, setShowTagModal] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [selectedTags, setSelectedTags] = useState<string[]>([])
+  const [tagInput, setTagInput] = useState('')
+  
+  // 加载图片资源库
+  const loadImageGallery = async () => {
+    setLoading(true)
     try {
-      // 直接使用本地文件URL，不依赖后端上传
-      const imageUrl = URL.createObjectURL(file)
-      onAddImage(imageUrl)
-      message.success('图片添加成功')
+      const response = await materialService.getMaterials({
+        type: 'image',
+        // 当searchKeyword为'all'或空字符串时，不传递keyword参数，搜索所有图片
+        keyword: searchKeyword === 'all' || searchKeyword === '' ? undefined : searchKeyword,
+        tags: selectedTag === '全部' ? undefined : [selectedTag]
+      })
+      setImageGallery(response.data.data || [])
     } catch (error) {
+      console.error('加载图片资源失败:', error)
+      message.error('加载图片资源失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+  
+  // 监听搜索和标签变化，重新加载资源
+  useEffect(() => {
+    loadImageGallery()
+  }, [searchKeyword, selectedTag])
+  
+  // 监听抽屉打开，加载资源库
+  useEffect(() => {
+    if (imageDrawerVisible) {
+      loadImageGallery()
+    }
+  }, [imageDrawerVisible])
+  
+  // 上传图片函数 - 支持不同的上传模式
+  const handleUploadImage = async (file: File, uploadToLibrary: boolean = false) => {
+    setUploading(true)
+    try {
+      if (uploadToLibrary) {
+        // 图片抽屉上传：保存到资源库
+        const response = await materialService.uploadMaterial(file, 'image')
+        
+        // 获取fileUrl的灵活方式，考虑不同的响应结构
+        let fileUrl = null;
+        if (response) {
+          // 尝试直接从response获取fileUrl
+          if (response.fileUrl) {
+            fileUrl = response.fileUrl;
+          } 
+          // 尝试从response.data获取fileUrl
+          else if (response.data && response.data.fileUrl) {
+            fileUrl = response.data.fileUrl;
+          }
+          // 检查是否有其他可能的URL字段
+          else if (response.url) {
+            fileUrl = response.url;
+          }
+          else if (response.data && response.data.url) {
+            fileUrl = response.data.url;
+          }
+        }
+        
+        if (fileUrl) {
+          console.log('获取到的图片URL:', fileUrl)
+          
+          // 处理URL格式，确保使用正确的端口
+          let processedUrl = fileUrl;
+          
+          // 如果URL是相对路径，则添加当前域名
+          if (fileUrl.startsWith('/')) {
+            // 使用当前页面的域名和端口
+            const baseUrl = window.location.origin;
+            processedUrl = `${baseUrl}${fileUrl}`;
+          }
+          // 如果URL包含localhost:5173但我们运行在不同端口，进行替换
+          else if (fileUrl.includes('localhost:5173')) {
+            const baseUrl = window.location.origin;
+            processedUrl = fileUrl.replace('http://localhost:5173', baseUrl);
+          }
+          
+          message.success('图片上传到资源库成功')
+          // 上传成功后刷新资源库
+          loadImageGallery()
+          // 同时添加到画布（安全检查onAddImage）
+          try {
+            // 确保onAddImage存在且为函数
+            if (onAddImage && typeof onAddImage === 'function') {
+              console.log('调用onAddImage添加图片，使用URL:', processedUrl)
+              onAddImage(processedUrl)
+            } else {
+              console.warn('onAddImage未定义或不是函数，无法将图片添加到画布')
+            }
+          } catch (error) {
+            console.error('调用onAddImage时发生错误:', error)
+          }
+        } else {
+            console.warn('上传成功但返回数据格式不正确:', response)
+            message.warning('图片上传成功但无法获取图片URL，请刷新资源库查看')
+          // 仍然刷新资源库，因为图片已上传成功
+          loadImageGallery()
+        }
+      } else {
+        // 普通上传：直接上传图片并添加到画布
+        // 创建一个临时URL用于预览
+        const tempUrl = URL.createObjectURL(file);
+        
+        try {
+          // 确保onAddImage存在且为函数
+          if (onAddImage && typeof onAddImage === 'function') {
+            console.log('普通上传：直接添加图片到画布，使用临时URL:', tempUrl)
+            onAddImage(tempUrl)
+            message.success('图片上传成功')
+          } else {
+            console.warn('onAddImage未定义或不是函数，无法将图片添加到画布')
+            message.error('图片添加失败')
+          }
+        } catch (error) {
+          console.error('普通上传添加图片到画布时发生错误:', error)
+          message.error('图片添加失败')
+        } finally {
+          // 清理临时URL
+          setTimeout(() => URL.revokeObjectURL(tempUrl), 1000);
+        }
+      }
+    } catch (error) {
+      console.error('图片上传失败:', error)
       message.error('图片上传失败')
+    } finally {
+      setUploading(false)
     }
     return false
   }
+  
+  // 重命名资源
+  const handleRename = (material: Material) => {
+    Modal.confirm({
+      title: '重命名图片',
+      content: (
+        <Input 
+          defaultValue={material.name} 
+          ref={(input) => {
+            if (input) {
+              setTimeout(() => input.focus(), 0);
+              // 尝试选中文件名部分（不含扩展名）
+              const parts = material.name.split('.');
+              if (parts.length > 1) {
+                input.setSelectionRange(0, material.name.length - parts[parts.length - 1].length - 1);
+              } else {
+                input.select();
+              }
+            }
+          }}
+          id="rename-input"
+        />
+      ),
+      onOk: async () => {
+        const newName = (document.getElementById('rename-input') as HTMLInputElement)?.value.trim();
+        if (!newName) {
+          message.error('名称不能为空');
+          return;
+        }
+        
+        try {
+          const updatedMaterial = await materialService.updateMaterial(material.id, {
+            ...material,
+            name: newName
+          });
+          
+          // 更新本地资源库列表
+          setImageGallery(prev => 
+            prev.map(item => 
+              item.id === material.id ? updatedMaterial : item
+            )
+          );
+          
+          message.success('重命名成功');
+        } catch (error) {
+          console.error('重命名失败:', error);
+          message.error('重命名失败');
+        }
+      }
+    });
+  };
+  
+  // 编辑标签
+  const handleEditTags = (material: Material) => {
+    const [inputValue, setInputValue] = useState<string>(
+      material.tags && material.tags.length > 0 ? material.tags.join(', ') : ''
+    );
+    
+    Modal.confirm({
+      title: '编辑图片标签',
+      content: (
+        <Input.TextArea
+          rows={3}
+          placeholder="输入标签，用逗号分隔"
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          id="tags-input"
+        />
+      ),
+      onOk: async () => {
+        try {
+          // 将输入的字符串分割为标签数组
+          const tags = inputValue
+            .split(/[,，]/) // 支持中英文逗号
+            .map(tag => tag.trim())
+            .filter(tag => tag.length > 0); // 过滤空标签
+          
+          const updatedMaterial = await materialService.updateMaterial(material.id, {
+            ...material,
+            tags
+          });
+          
+          // 更新本地资源库列表
+          setImageGallery(prev => 
+            prev.map(item => 
+              item.id === material.id ? updatedMaterial : item
+            )
+          );
+          
+          message.success('标签更新成功');
+        } catch (error) {
+          console.error('更新标签失败:', error);
+          message.error('标签更新失败');
+        }
+      },
+      onCancel: () => {
+        setInputValue(''); // 重置输入值
+      }
+    });
+  };
+  
+  // 删除资源
+  const handleDeleteMaterial = (materialId: string) => {
+    Modal.confirm({
+      title: '确认删除',
+      content: '确定要删除此图片资源吗？此操作不可撤销。',
+      danger: true,
+      onOk: async () => {
+        try {
+          await materialService.deleteMaterial(materialId);
+          
+          // 从本地资源库列表中移除
+          setImageGallery(prev => 
+            prev.filter(item => item.id !== materialId)
+          );
+          
+          message.success('图片资源已删除');
+        } catch (error) {
+          console.error('删除资源失败:', error);
+          message.error('删除资源失败');
+        }
+      }
+    });
+  };
 
   // 添加文字
-  const handleAddText = (type) => {
+  const handleAddText = (type: 'title' | 'subtitle' | 'body' | 'transform' | '3d') => {
+    // 传递类型参数给onAddText函数
     onAddText(type)
-    message.success('文字添加成功')
+    
+    // 根据文字类型显示不同的成功消息
+    const typeMap = {
+      'title': '标题',
+      'subtitle': '副标题',
+      'body': '正文',
+      'transform': '变形文字',
+      '3d': '3D文字'
+    }
+    message.success(`${typeMap[type] || '文字'}添加成功`)
   }
 
 
@@ -1314,7 +1586,7 @@ export default function LeftSidebar({
           <div className="space-y-1 pl-4">
             {/* 上传图片 (2.1.3.1.1) */}
             <Upload
-              beforeUpload={handleUploadImage}
+              beforeUpload={(file) => handleUploadImage(file, false)} // 明确设置为普通上传模式
               showUploadList={false}
               accept="image/*"
             >
@@ -2042,35 +2314,144 @@ export default function LeftSidebar({
         width={400}
       >
         <div className="space-y-4">
+          {/* 搜索功能 */}
           <div>
             <div className="mb-2">搜索图片：</div>
             <Input
               placeholder="搜索图片"
               prefix={<SearchOutlined />}
               allowClear
+              value={searchKeyword}
+              onChange={(e) => setSearchKeyword(e.target.value)}
             />
           </div>
+          
+          {/* 上传图片到资源库 */}
           <div>
             <div className="mb-2">上传图片：</div>
             <Upload
-              beforeUpload={handleUploadImage}
+              beforeUpload={(file) => handleUploadImage(file, true)} // 明确设置为上传到资源库
               showUploadList={false}
               accept="image/*"
             >
-              <Button block icon={<UploadOutlined />}>
-                上传图片
+              <Button block icon={<UploadOutlined />} loading={uploading}>
+                上传到资源库
               </Button>
             </Upload>
           </div>
+          
+          {/* 标签筛选 */}
           <div>
-            <div className="mb-2">按标签展示：</div>
+            <div className="mb-2">按标签筛选：</div>
             <div className="flex flex-wrap gap-2">
-              {/* 标签列表 */}
-              <div className="px-2 py-1 bg-gray-100 rounded text-xs cursor-pointer">全部</div>
-              <div className="px-2 py-1 bg-gray-100 rounded text-xs cursor-pointer">风景</div>
-              <div className="px-2 py-1 bg-gray-100 rounded text-xs cursor-pointer">人物</div>
-              <div className="px-2 py-1 bg-gray-100 rounded text-xs cursor-pointer">美食</div>
+              {[
+                { key: '全部', label: '全部' },
+                { key: '风景', label: '风景' },
+                { key: '人物', label: '人物' },
+                { key: '美食', label: '美食' },
+                { key: '动物', label: '动物' },
+                { key: '建筑', label: '建筑' },
+              ].map((tag) => (
+                <div 
+                  key={tag.key}
+                  className={`px-2 py-1 rounded text-xs cursor-pointer ${
+                    selectedTag === tag.key 
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-gray-100'
+                  }`}
+                  onClick={() => setSelectedTag(tag.key)}
+                >
+                  {tag.label}
+                </div>
+              ))}
             </div>
+          </div>
+          
+          {/* 图片资源库展示 */}
+          <div>
+            <div className="mb-2 flex justify-between items-center">
+              <span>图片资源库：</span>
+              {imageGallery.length > 0 && (
+                <Badge count={imageGallery.length} />
+              )}
+            </div>
+            
+            {loading ? (
+              <div className="text-center py-4">加载中...</div>
+            ) : imageGallery.length === 0 ? (
+              <Empty description="暂无图片资源" />
+            ) : (
+              <div className="grid grid-cols-2 gap-2 max-h-96 overflow-y-auto pr-1">
+                {imageGallery.map((material) => (
+                  <div key={material.id} className="relative cursor-pointer group">
+                    <div 
+                      className="aspect-square bg-gray-100 rounded overflow-hidden flex items-center justify-center"
+                      onClick={() => onAddImage(material.fileUrl)}
+                    >
+                      <img 
+                        src={material.fileUrl} 
+                        alt={material.name} 
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.src = '/images/placeholder.jpg';
+                        }}
+                      />
+                    </div>
+                    <div className="text-xs truncate text-center mt-1">{material.name}</div>
+                    
+                    {/* 标签显示 */}
+                    {material.tags && material.tags.length > 0 && (
+                      <div className="mt-1 flex flex-wrap justify-center gap-1">
+                        {material.tags.slice(0, 2).map((tag, index) => (
+                          <Tag key={index} color="blue" className="text-xs">{tag}</Tag>
+                        ))}
+                        {material.tags.length > 2 && (
+                          <Tag color="blue" className="text-xs">+{material.tags.length - 2}</Tag>
+                        )}
+                      </div>
+                    )}
+                    
+                    {/* 操作按钮 */}
+                    <div className="absolute -right-1 -top-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Dropdown 
+                        menu={{
+                          items: [
+                            {
+                              key: 'rename',
+                              icon: <EditOutlined />,
+                              label: '重命名',
+                              onClick: () => handleRename(material)
+                            },
+                            {
+                              key: 'tag',
+                              icon: <TagOutlined />,
+                              label: '编辑标签',
+                              onClick: () => handleEditTags(material)
+                            },
+                            {
+                              key: 'delete',
+                              icon: <DeleteOutlined />,
+                              label: '删除',
+                              danger: true,
+                              onClick: () => handleDeleteMaterial(material.id)
+                            },
+                          ]
+                        }}
+                      >
+                        <Button 
+                          type="text" 
+                          size="small" 
+                          className="bg-white rounded-full shadow-md p-1"
+                        >
+                          <MoreOutlined />
+                        </Button>
+                      </Dropdown>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </Drawer>

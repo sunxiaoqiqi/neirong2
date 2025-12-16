@@ -355,18 +355,82 @@ export default function Editor() {
      示例编辑操作
   ========================= */
 
-  const addText = () => {
+  const addText = (type: 'title' | 'subtitle' | 'body' | 'transform' | '3d' | string = 'body') => {
+    console.log(`[调试] 开始添加文字，类型: ${type}`)
     const canvas = canvasRef.current
-    if (!canvas) return
-    const t = new fabric.Textbox('文本', {
-      left: CANVAS_WIDTH / 2,
-      top: CANVAS_HEIGHT / 2,
-      originX: 'center',
-      originY: 'center',
-      fontSize: 24,
-    })
-    canvas.add(t)
-    canvas.setActiveObject(t)
+    if (!canvas) {
+      console.error('[调试] 画布未初始化')
+      return
+    }
+    
+    try {
+      // 为所有类型文字使用相同的基础创建方式，但位置错开以避免重叠
+      const baseConfig = {
+        title: { content: "主标题", fontSize: 36, fontWeight: "bold" as const, color: "#333333", y: 100 },
+        subtitle: { content: "副标题", fontSize: 24, fontWeight: "600" as const, color: "#666666", y: 180 },
+        body: { content: "请输入正文内容...", fontSize: 16, fontWeight: "normal" as const, color: "#444444", y: 260 },
+        transform: { content: "变形文字", fontSize: 28, fontWeight: "bold" as const, color: "#e63946", y: 340 },
+        "3d": { content: "3D文字", fontSize: 40, fontWeight: "bold" as const, color: "#2a9d8f", y: 420 }
+      }
+      
+      const config = baseConfig[type as keyof typeof baseConfig] || baseConfig.body
+      console.log(`[调试] 使用配置:`, config)
+      
+      // 使用最基本的属性创建文本对象，确保最大兼容性
+      console.log(`[调试] 创建文字对象，类型: ${type}`)
+      
+      // 为避免特殊效果导致问题，先创建完全基础的文本对象
+      const textObj = new fabric.Textbox(config.content, {
+        left: CANVAS_WIDTH / 2,  // 水平居中
+        top: config.y,           // 垂直位置错开
+        originX: 'center',       // 以中心点定位
+        originY: 'center',
+        fontSize: config.fontSize,
+        fontWeight: config.fontWeight,
+        fill: config.color,      // 使用基本颜色
+        textAlign: 'center' as const,  // 全部居中对齐
+        width: 500,              // 统一宽度以确保文本换行行为一致
+        // 添加ID以便于调试
+        id: `text_${type}_${Date.now()}`
+      })
+      
+      // 记录创建的对象信息
+      console.log(`[调试] 文字对象已创建，属性:`, {
+        id: textObj.id,
+        text: textObj.text,
+        type: textObj.type,
+        left: textObj.left,
+        top: textObj.top
+      })
+      
+      // 直接添加到画布，不应用任何特殊效果以确保基础功能正常
+      console.log(`[调试] 准备添加到画布`)
+      canvas.add(textObj)
+      
+      // 确认已添加到画布
+      const objects = canvas.getObjects()
+      console.log(`[调试] 画布对象数量: ${objects.length}`)
+      
+      // 选中对象
+      canvas.setActiveObject(textObj)
+      
+      // 强制渲染画布
+      console.log(`[调试] 渲染画布`)
+      canvas.renderAll()
+      
+      // 额外的刷新步骤
+      setTimeout(() => {
+        console.log(`[调试] 额外渲染确保显示`)
+        canvas.renderAll()
+      }, 50)
+    } catch (error: any) {
+      console.error('[调试] 添加文字时出错:', error)
+      if (error.message) {
+        console.error('[调试] 错误详情:', error.message)
+      }
+      message.error(`添加文字失败: ${error.message || '未知错误'}`)
+    }
+    console.log('[调试] 文字添加流程结束')
   }
 
   /* =========================
@@ -824,6 +888,142 @@ export default function Editor() {
   }
 
   /* =========================
+     添加图片到画布
+   ========================= */
+  
+  const addImage = async (imageUrl: string) => {
+    console.log('开始添加图片:', imageUrl)
+    const canvas = canvasRef.current
+    if (!canvas) {
+      console.error('Canvas未初始化')
+      return
+    }
+    
+    // 验证图片URL格式
+    if (!imageUrl || typeof imageUrl !== 'string') {
+      message.error('无效的图片URL')
+      console.error('无效的图片URL:', imageUrl)
+      return
+    }
+
+    try {
+      const options: fabric.IImageOptions = {
+        crossOrigin: 'anonymous',
+      }
+
+      // 预检查URL是否可达（简单的图片加载验证）
+      const imgElement = new Image()
+      imgElement.crossOrigin = 'anonymous'
+      
+      // 设置超时处理
+      const timeoutPromise = new Promise<boolean>((_, reject) => {
+        setTimeout(() => reject(new Error('图片加载超时')), 10000) // 10秒超时
+      })
+      
+      // 加载图片验证
+      const loadPromise = new Promise<boolean>((resolve, reject) => {
+        imgElement.onload = () => resolve(true)
+        imgElement.onerror = () => {
+          console.error('图片URL验证失败:', imageUrl)
+          reject(new Error('无法加载图片，请检查URL或网络连接'))
+        }
+        imgElement.src = imageUrl
+      })
+      
+      // 尝试验证图片URL
+      try {
+        await Promise.race([loadPromise, timeoutPromise])
+        console.log('图片URL验证成功')
+      } catch (validationError) {
+        // 如果直接加载失败，尝试创建一个备用方案
+        console.warn('直接图片验证失败，尝试备用方案:', validationError.message)
+        
+        // 对于开发环境，我们可以提供一个备用图片用于演示
+        // 这个图片URL应该指向一个可靠的公共图片服务
+        const fallbackImageUrl = 'https://via.placeholder.com/400x300?text=Image+Not+Available'
+        
+        message.warning('无法加载原始图片，使用备用图片')
+        // 直接使用fabric加载备用图片
+        fabric.Image.fromURL(fallbackImageUrl, (fallbackImg) => {
+          setupAndAddImageToCanvas(fallbackImg, canvas)
+          message.warning('已使用备用图片替代，请检查原始图片URL')
+        }, options)
+        return
+      }
+
+      // 使用fabric.js创建图片对象
+      fabric.Image.fromURL(imageUrl, (img) => {
+        console.log('图片加载成功，原始尺寸:', { width: img.width, height: img.height })
+        setupAndAddImageToCanvas(img, canvas)
+        message.success('图片添加成功')
+      }, options)
+    } catch (error) {
+      console.error('添加图片时发生错误:', error)
+      message.error('图片添加失败，请检查图片URL或网络连接')
+    }
+  }
+  
+  // 辅助函数：设置图片属性并添加到画布
+  const setupAndAddImageToCanvas = (img: fabric.Image, canvas: fabric.Canvas) => {
+    // 设置图片属性
+    img.set({
+      selectable: true,
+      hasControls: true,
+      hasBorders: true,
+      lockMovementX: false,
+      lockMovementY: false,
+      lockRotation: false,
+      lockScalingX: false,
+      lockScalingY: false,
+      lockUniScaling: false,
+      opacity: 1,
+      id: `image_${Date.now()}`
+    })
+    
+    // 计算图片缩放比例，使其适应画布
+    let scale = 1
+    const maxWidth = CANVAS_WIDTH * 0.8
+    const maxHeight = CANVAS_HEIGHT * 0.8
+    
+    // 安全检查尺寸属性是否存在
+    const imgWidth = img.width || 400
+    const imgHeight = img.height || 300
+    
+    if (imgWidth > maxWidth || imgHeight > maxHeight) {
+      const scaleX = maxWidth / imgWidth
+      const scaleY = maxHeight / imgHeight
+      scale = Math.min(scaleX, scaleY)
+    }
+    
+    // 设置位置和缩放
+    const displayWidth = imgWidth * scale
+    const displayHeight = imgHeight * scale
+    
+    img.set({
+      left: (canvas.width! - displayWidth) / 2,
+      top: (canvas.height! - displayHeight) / 2,
+      scaleX: scale,
+      scaleY: scale
+    })
+    
+    img.setCoords()
+    
+    // 添加到画布
+    canvas.add(img)
+    canvas.bringToFront(img)
+    canvas.setActiveObject(img)
+    canvas.requestRenderAll()
+    
+    // 延迟再次渲染，确保显示正常
+    setTimeout(() => {
+      canvas.requestRenderAll()
+    }, 100)
+    
+    // 更新历史记录
+    syncCanvasToPage(true)
+  }
+
+  /* =========================
      Render
    ========================= */
 
@@ -874,6 +1074,7 @@ export default function Editor() {
         <LeftSidebar 
           canvas={canvasRef.current} 
           onAddText={addText}
+          onAddImage={addImage}
           onApplyTemplate={handleApplyTemplate}
           onApplyToCanvas={(canvasIndex, canvasData, canvasCodeMap, smartTruncate) => {
             // 返回 Promise，以便串行处理
@@ -1043,12 +1244,27 @@ export default function Editor() {
             })
           }}
         />
-        <div className="flex-1 flex items-center justify-center bg-gray-100">
-          <div style={{ transform: `scale(${zoom})` }}>
+        <div className="flex-1 flex items-center justify-center bg-gray-100 overflow-auto">
+          <div 
+            style={{ 
+              transform: `scale(${zoom})`,
+              transformOrigin: 'top center',
+              transition: 'transform 0.2s ease'
+            }}
+          >
             <canvas ref={canvasElRef} />
           </div>
         </div>
-        <RightSidebar canvas={canvasRef.current} selectedObject={selectedObject} />
+        <div className="w-[390px] border-l bg-white overflow-y-auto overflow-x-hidden flex-shrink-0">
+          <div className="p-4 w-full max-w-full box-border">
+            <RightSidebar 
+              canvas={canvasRef.current} 
+              selectedObject={selectedObject}
+              zoom={zoom}
+              onZoomChange={setZoom}
+            />
+          </div>
+        </div>
       </div>
 
       {/* 画布条 */}
@@ -1071,26 +1287,28 @@ export default function Editor() {
                 }`}
                 onClick={() => switchPage(i)}
               >
-                <div className="w-16 h-20 border">
+                <div className="w-16 h-20 border relative">
                   {p.thumbnail && (
                     <img
                       src={p.thumbnail}
                       className="w-full h-full object-contain"
                     />
                   )}
+                  <Button
+                    size="small"
+                    danger
+                    type="primary"
+                    icon={<DeleteOutlined />}
+                    className="absolute -top-2 -right-2 z-10"
+                    onClick={e => {
+                      e.stopPropagation()
+                      deletePage(i)
+                    }}
+                  />
                 </div>
                 <div className="text-xs text-center mt-1">
                   画布 {i + 1}
                 </div>
-                <Button
-                  size="small"
-                  danger
-                  icon={<DeleteOutlined />}
-                  onClick={e => {
-                    e.stopPropagation()
-                    deletePage(i)
-                  }}
-                />
               </div>
             ))}
             <div
