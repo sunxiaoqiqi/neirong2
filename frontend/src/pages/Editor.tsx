@@ -21,6 +21,7 @@ import ExportDialog from '@/components/editor/ExportDialog'
 import LeftSidebar from '@/components/editor/LeftSidebar'
 import RightSidebar from '@/components/editor/RightSidebar'
 import ArticlePaginationModal from '@/components/editor/ArticlePaginationModal'
+import ImageEditModal from '@/components/editor/ImageEditModal'
 import type { Article } from '@/types/article'
 
 /* =========================
@@ -112,6 +113,9 @@ export default function Editor() {
   const [articlePaginationVisible, setArticlePaginationVisible] = useState(false)
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null)
   const [articleCanvasSize, setArticleCanvasSize] = useState<{ width: number; height: number } | null>(null)
+  const [imageEditVisible, setImageEditVisible] = useState(false)
+  const [editingImage, setEditingImage] = useState<fabric.Image | null>(null)
+  const [imageEditMode, setImageEditMode] = useState<'crop' | 'magicWand' | 'erase'>('crop')
 
   /* ---------- guard ---------- */
   const isApplyingRef = useRef(false)
@@ -185,7 +189,7 @@ export default function Editor() {
 
   useEffect(() => {
     let handleKeyDown: ((e: KeyboardEvent) => void) | null = null
-    let timer: NodeJS.Timeout | null = null
+    let timer: ReturnType<typeof setTimeout> | null = null
 
     // 使用 setTimeout 确保画布已经初始化
     timer = setTimeout(() => {
@@ -2154,11 +2158,16 @@ export default function Editor() {
         </div>
         <div className="w-[390px] border-l bg-white overflow-y-auto overflow-x-hidden flex-shrink-0">
           <div className="p-4 w-full max-w-full box-border">
-            <RightSidebar 
-              canvas={canvasRef.current} 
+            <RightSidebar
+              canvas={canvasRef.current}
               selectedObject={selectedObject}
               zoom={zoom}
               onZoomChange={setZoom}
+              onOpenImageEdit={(image, mode) => {
+                setEditingImage(image)
+                setImageEditMode(mode)
+                setImageEditVisible(true)
+              }}
             />
           </div>
         </div>
@@ -2242,6 +2251,51 @@ export default function Editor() {
         }}
         canvasWidth={articleCanvasSize?.width || CANVAS_WIDTH}
         canvasHeight={articleCanvasSize?.height || CANVAS_HEIGHT}
+      />
+
+      {/* 图片处理弹框 */}
+      <ImageEditModal
+        visible={imageEditVisible}
+        imageObject={editingImage}
+        canvas={canvasRef.current}
+        mode={imageEditMode}
+        onClose={() => {
+          setImageEditVisible(false)
+          setEditingImage(null)
+        }}
+        onApply={(processedImageData) => {
+          if (!editingImage || !canvasRef.current) return
+
+          // 使用处理后的图片数据更新图片对象
+          fabric.Image.fromURL(processedImageData, (newImg: fabric.Image) => {
+            // 保持原有的位置、尺寸和变换
+            const currentLeft = editingImage.left
+            const currentTop = editingImage.top
+            const currentScaleX = editingImage.scaleX
+            const currentScaleY = editingImage.scaleY
+            const currentAngle = editingImage.angle
+            const currentOpacity = editingImage.opacity
+
+            // 替换图片元素
+            editingImage.setElement(newImg.getElement())
+            editingImage.set({
+              left: currentLeft,
+              top: currentTop,
+              scaleX: currentScaleX,
+              scaleY: currentScaleY,
+              angle: currentAngle,
+              opacity: currentOpacity,
+            })
+
+            canvasRef.current!.renderAll()
+            
+            // 触发变更事件
+            canvasRef.current!.fire('object:modified', { target: editingImage })
+            
+            setImageEditVisible(false)
+            setEditingImage(null)
+          }, { crossOrigin: 'anonymous' })
+        }}
       />
 
       {/* 保存命名 */}

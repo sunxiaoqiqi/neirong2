@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ColorPicker, Button, Space, message, Modal } from 'antd';
 import { EyeOutlined, CheckCircleOutlined, EyeInvisibleOutlined, BorderOutlined } from '@ant-design/icons';
 import { fabric } from 'fabric';
@@ -22,6 +22,7 @@ const ColorPickerWithEyeDropper: React.FC<ColorPickerWithEyeDropperProps> = ({
   const [lastColor, setLastColor] = useState('');
   const [previewColor, setPreviewColor] = useState(''); // 实时预览的颜色
   const [isColorPreviewed, setIsColorPreviewed] = useState(false); // 是否已经预览了颜色
+  const [isPickingColor, setIsPickingColor] = useState(false); // 是否正在拾取颜色（防止重复点击）
   const overlayRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null); // 预览元素引用
   
@@ -76,167 +77,36 @@ const ColorPickerWithEyeDropper: React.FC<ColorPickerWithEyeDropperProps> = ({
       const canvasEl = canvas.getElement();
       if (!canvasEl) return null;
       
-      // 方法1: 使用fabric.js的getPixelColor方法(如果支持)
-      try {
-        // 使用类型断言解决TypeScript类型错误
-        const fabricCanvas = canvas as any;
-        let hexColor = fabricCanvas.getPixelColor(x, y);
-        if (hexColor) {
-          // 确保颜色是标准十六进制格式
-          if (!hexColor.startsWith('#')) {
-            hexColor = '#' + hexColor;
-          }
-          return hexColor;
-        }
-      } catch (fabricError) {
-        // 方法2: 如果fabric.js方法失败，使用Canvas API
-        const ctx = canvasEl.getContext('2d');
-        if (!ctx) throw new Error('无法获取canvas上下文');
-        
-        // 获取像素数据
-        const pixel = ctx.getImageData(x, y, 1, 1).data;
-        
-        // 将RGB转换为十六进制颜色
-        return rgbToHex(pixel[0], pixel[1], pixel[2]);
+      // 优先使用Canvas API直接获取像素颜色（最可靠的方法）
+      const ctx = canvasEl.getContext('2d', { willReadFrequently: true });
+      if (!ctx) {
+        console.error('无法获取canvas上下文');
+        return null;
       }
       
-      // 方法3: 如果前两种方法都失败，尝试备选策略
-      const activeObject = canvas.getActiveObject();
-      if (activeObject && activeObject.fill) {
-        return typeof activeObject.fill === 'string' ? activeObject.fill : '#000000';
+      // 获取像素数据
+      const imageData = ctx.getImageData(x, y, 1, 1);
+      if (!imageData || !imageData.data) {
+        console.error('无法获取像素数据');
+        return null;
       }
       
-      // 获取画布背景色
-      const fabricCanvas = canvas as any;
-      const backgroundColor = fabricCanvas.backgroundColor;
-      if (typeof backgroundColor === 'string') {
-        return backgroundColor;
-      } else if (backgroundColor && typeof backgroundColor === 'object' && 'hex' in backgroundColor) {
-        // 添加类型断言确保返回string类型
-        return String(backgroundColor.hex);
+      const pixel = imageData.data;
+      const r = pixel[0];
+      const g = pixel[1];
+      const b = pixel[2];
+      const a = pixel[3];
+      
+      // 如果alpha为0，返回透明色
+      if (a === 0) {
+        return 'rgba(0, 0, 0, 0)';
       }
       
-      return '#ffffff'; // 默认白色
+      // 将RGB转换为十六进制颜色
+      return rgbToHex(r, g, b);
     } catch (error) {
       console.error('获取颜色出错:', error);
       return null;
-    }
-  };
-  
-  // 处理鼠标移动时的实时颜色预览
-  const handleMouseMove = (e: MouseEvent) => {
-    if (!isEyeDropperActive || !canvas) return;
-    
-    try {
-      // 获取canvas元素
-      const canvasEl = canvas.getElement();
-      if (!canvasEl) return;
-      
-      // 获取canvas在页面中的位置
-      const rect = canvasEl.getBoundingClientRect();
-      
-      // 计算相对于canvas的坐标
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      
-      // 检查是否在canvas范围内
-      if (x >= 0 && x <= rect.width && y >= 0 && y <= rect.height) {
-        const hexColor = getColorAtPosition(x, y);
-        if (hexColor) {
-          setPreviewColor(hexColor);
-          setIsColorPreviewed(true);
-          
-          // 更新鼠标悬停位置的预览提示
-          if (previewRef.current) {
-            previewRef.current.style.left = `${e.clientX + 10}px`;
-            previewRef.current.style.top = `${e.clientY - 30}px`;
-          }
-        }
-      }
-    } catch (error) {
-      console.error('实时预览出错:', error);
-    }
-  };
-  
-  // 处理颜色拾取（单击确认）
-  const handleColorPick = (e: MouseEvent) => {
-    if (!isEyeDropperActive || !canvas) return;
-    
-    // 阻止事件冒泡，防止触发其他操作
-    e.stopPropagation();
-    e.preventDefault();
-    
-    try {
-      // 获取canvas元素
-      const canvasEl = canvas.getElement();
-      if (!canvasEl) {
-        throw new Error('无法获取canvas元素');
-      }
-      
-      // 获取canvas在页面中的位置
-      const rect = canvasEl.getBoundingClientRect();
-      
-      // 计算相对于canvas的坐标
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      
-      // 检查点击是否在canvas范围内
-      if (x >= 0 && x <= rect.width && y >= 0 && y <= rect.height) {
-        const hexColor = getColorAtPosition(x, y);
-        
-        if (hexColor) {
-          // 直接调用onChange并提供一个与antd ColorPicker兼容的颜色对象
-          onChange({
-            toHexString: () => hexColor,
-            toHslString: () => hexColor,
-            toRgbString: () => hexColor,
-            toRgb: () => {
-              // 提取RGB值的简单实现
-              const r = parseInt(hexColor.slice(1, 3), 16);
-              const g = parseInt(hexColor.slice(3, 5), 16);
-              const b = parseInt(hexColor.slice(5, 7), 16);
-              return { r, g, b, a: 1 };
-            }
-          });
-          
-          // 显示成功消息，并包含颜色预览
-          Modal.success({
-            title: '颜色选择成功',
-            content: (
-              <div style={{ textAlign: 'center' }}>
-                <div style={{
-                  width: '50px',
-                  height: '50px',
-                  backgroundColor: hexColor,
-                  margin: '10px auto',
-                  border: '1px solid #d9d9d9',
-                  borderRadius: '4px'
-                }} />
-                <p>颜色值: {hexColor}</p>
-                {lastColor && lastColor !== hexColor && (
-                  <p style={{ color: '#666' }}>之前颜色: {lastColor}</p>
-                )}
-              </div>
-            ),
-            onOk() {
-              // 确认后才完全退出吸色模式
-              exitEyeDropperMode();
-            },
-            okText: '确定',
-            cancelText: '取消',
-            closable: true,
-            maskClosable: true,
-            onCancel: exitEyeDropperMode
-          });
-        } else {
-          throw new Error('无法获取有效的颜色值');
-        }
-      } else {
-        message.warning('请在画布范围内点击获取颜色');
-      }
-    } catch (error) {
-      console.error('吸色功能出错:', error);
-      message.error('获取颜色失败，请重试');
     }
   };
   
@@ -250,11 +120,16 @@ const ColorPickerWithEyeDropper: React.FC<ColorPickerWithEyeDropperProps> = ({
   
   // 退出吸色模式
   const exitEyeDropperMode = () => {
+    if (!isEyeDropperActive) return; // 如果已经退出，不再执行
+    
     setIsEyeDropperActive(false);
     setIsColorPreviewed(false);
+    setIsPickingColor(false);
     setPreviewColor('');
-    document.body.style.cursor = 'default';
-    document.body.style.pointerEvents = 'auto'; // 恢复正常交互
+    
+    // 恢复鼠标样式
+    document.body.style.cursor = '';
+    document.body.style.pointerEvents = '';
     
     // 恢复canvas的evented状态
     if (canvas) {
@@ -264,12 +139,6 @@ const ColorPickerWithEyeDropper: React.FC<ColorPickerWithEyeDropperProps> = ({
         delete fabricCanvas.__prevEvented;
       }
     }
-    
-    // 移除事件监听器
-    document.removeEventListener('keydown', handleForceExit);
-    document.removeEventListener('click', handleColorPick, true);
-    document.removeEventListener('click', handleGlobalClick, true);
-    document.removeEventListener('mousemove', handleMouseMove);
   };
   
   // 强制退出吸色模式的处理函数
@@ -300,42 +169,185 @@ const ColorPickerWithEyeDropper: React.FC<ColorPickerWithEyeDropperProps> = ({
   
   // 处理吸色模式相关事件
   useEffect(() => {
-    // 确保先移除所有可能存在的旧事件监听器
-    document.removeEventListener('click', handleColorPick, true);
-    document.removeEventListener('click', handleGlobalClick, true);
-    document.removeEventListener('mousemove', handleMouseMove);
-    
     if (isEyeDropperActive && canvas) {
-      // 吸色模式激活时的处理
-      document.addEventListener('click', handleColorPick, true); // 使用捕获阶段
-      document.addEventListener('click', handleGlobalClick, true);
-      document.addEventListener('mousemove', handleMouseMove); // 添加鼠标移动事件监听
-      document.body.style.pointerEvents = 'auto'; // 允许点击事件
+      // 在useEffect内部定义事件处理函数，可以访问最新的状态
+      const handleClick = (e: MouseEvent) => {
+        if (!isEyeDropperActive || !canvas || isPickingColor) return;
+        
+        // 检查点击的目标，如果是Modal或其他UI元素，不处理
+        const target = e.target as HTMLElement;
+        if (target.closest('.ant-modal') || target.closest('.ant-message') || target.closest('.ant-notification')) {
+          return;
+        }
+        
+        // 阻止事件冒泡，防止触发其他操作
+        e.stopPropagation();
+        e.preventDefault();
+        
+        // 设置拾取状态，防止重复点击
+        setIsPickingColor(true);
+        
+        try {
+          // 获取canvas元素
+          const canvasEl = canvas.getElement();
+          if (!canvasEl) {
+            throw new Error('无法获取canvas元素');
+          }
+          
+          // 获取canvas在页面中的位置
+          const rect = canvasEl.getBoundingClientRect();
+          
+          // 计算相对于canvas的坐标（考虑缩放）
+          const scaleX = canvasEl.width / rect.width;
+          const scaleY = canvasEl.height / rect.height;
+          const x = Math.floor((e.clientX - rect.left) * scaleX);
+          const y = Math.floor((e.clientY - rect.top) * scaleY);
+          
+          // 检查点击是否在canvas范围内
+          if (x >= 0 && x < canvasEl.width && y >= 0 && y < canvasEl.height) {
+            const color = getColorAtPosition(x, y);
+            
+            if (color) {
+              // 先退出吸色模式，避免与Modal冲突
+              setIsEyeDropperActive(false);
+              setIsColorPreviewed(false);
+              setIsPickingColor(false);
+              setPreviewColor('');
+              document.body.style.cursor = '';
+              document.body.style.pointerEvents = '';
+              
+              // 恢复canvas的evented状态
+              if (canvas) {
+                const fabricCanvas = canvas as any;
+                if (typeof fabricCanvas.__prevEvented === 'boolean') {
+                  fabricCanvas.evented = fabricCanvas.__prevEvented;
+                  delete fabricCanvas.__prevEvented;
+                }
+              }
+              
+              // 创建颜色对象
+              const colorObj = {
+                toHexString: () => color.startsWith('#') ? color : `#${color}`,
+                toHslString: () => color,
+                toRgbString: () => color,
+                toRgb: () => {
+                  if (color === 'rgba(0, 0, 0, 0)') {
+                    return { r: 0, g: 0, b: 0, a: 0 };
+                  }
+                  // 提取RGB值
+                  if (color.startsWith('#')) {
+                    const r = parseInt(color.slice(1, 3), 16);
+                    const g = parseInt(color.slice(3, 5), 16);
+                    const b = parseInt(color.slice(5, 7), 16);
+                    return { r, g, b, a: 1 };
+                  }
+                  return { r: 0, g: 0, b: 0, a: 1 };
+                }
+              };
+              
+              // 直接应用颜色
+              onChange(colorObj);
+              
+              // 显示成功提示（简化版，不阻塞用户操作）
+              message.success({
+                content: `已选择颜色: ${color}`,
+                duration: 2,
+              });
+            } else {
+              message.warning('无法获取颜色，请重试');
+              setIsPickingColor(false);
+            }
+          } else {
+            message.warning('请在画布范围内点击获取颜色');
+            setIsPickingColor(false);
+          }
+        } catch (error) {
+          console.error('吸色功能出错:', error);
+          message.error('获取颜色失败，请重试');
+          setIsPickingColor(false);
+        }
+      };
+      
+      const handleMove = (e: MouseEvent) => {
+        if (!isEyeDropperActive || !canvas || isPickingColor) return;
+        
+        try {
+          // 获取canvas元素
+          const canvasEl = canvas.getElement();
+          if (!canvasEl) return;
+          
+          // 获取canvas在页面中的位置
+          const rect = canvasEl.getBoundingClientRect();
+          
+          // 计算相对于canvas的坐标（考虑缩放）
+          const scaleX = canvasEl.width / rect.width;
+          const scaleY = canvasEl.height / rect.height;
+          const x = Math.floor((e.clientX - rect.left) * scaleX);
+          const y = Math.floor((e.clientY - rect.top) * scaleY);
+          
+          // 检查是否在canvas范围内
+          if (x >= 0 && x < canvasEl.width && y >= 0 && y < canvasEl.height) {
+            const color = getColorAtPosition(x, y);
+            if (color) {
+              setPreviewColor(color);
+              setIsColorPreviewed(true);
+              
+              // 更新鼠标悬停位置的预览提示
+              if (previewRef.current) {
+                previewRef.current.style.left = `${e.clientX + 10}px`;
+                previewRef.current.style.top = `${e.clientY - 30}px`;
+                previewRef.current.style.display = 'flex';
+              }
+            }
+          } else {
+            // 鼠标离开canvas范围，隐藏预览
+            setIsColorPreviewed(false);
+            if (previewRef.current) {
+              previewRef.current.style.display = 'none';
+            }
+          }
+        } catch (error) {
+          console.error('实时预览出错:', error);
+        }
+      };
+      
+      // 使用捕获阶段，确保优先处理
+      document.addEventListener('click', handleClick, true);
+      document.addEventListener('mousemove', handleMove);
+      
+      return () => {
+        // 清理吸色模式相关事件监听器
+        document.removeEventListener('click', handleClick, true);
+        document.removeEventListener('mousemove', handleMove);
+      };
     }
-    
-    return () => {
-      // 清理吸色模式相关事件监听器
-      document.removeEventListener('click', handleColorPick, true);
-      document.removeEventListener('click', handleGlobalClick, true);
-      document.removeEventListener('mousemove', handleMouseMove);
-    };
-  }, [isEyeDropperActive]); // 只在吸色模式状态变化时执行
+  }, [isEyeDropperActive, canvas, isPickingColor]);
   
   // 确保在组件卸载时恢复正常状态
   useEffect(() => {
     return () => {
       if (isEyeDropperActive) {
-        // 强制重置状态并移除所有监听器
-        document.removeEventListener('keydown', handleForceExit);
-        document.removeEventListener('click', handleColorPick, true);
-        document.removeEventListener('click', handleGlobalClick, true);
-        document.removeEventListener('mousemove', handleMouseMove);
+        // 强制重置状态
+        setIsEyeDropperActive(false);
+        setIsColorPreviewed(false);
+        setIsPickingColor(false);
+        setPreviewColor('');
         
         // 恢复鼠标样式
-        document.body.style.cursor = 'default';
+        document.body.style.cursor = '';
+        document.body.style.pointerEvents = '';
+        
+        // 恢复canvas的evented状态
+        if (canvas) {
+          const fabricCanvas = canvas as any;
+          if (typeof fabricCanvas.__prevEvented === 'boolean') {
+            fabricCanvas.evented = fabricCanvas.__prevEvented;
+            delete fabricCanvas.__prevEvented;
+          }
+        }
       }
     };
-  }, []); // 只在组件卸载时执行一次
+  }, [isEyeDropperActive, canvas]); // 依赖项包含相关状态
   
   // 全屏遮罩提示组件
   const EyeDropperOverlay = () => (

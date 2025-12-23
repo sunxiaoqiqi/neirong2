@@ -19,14 +19,12 @@ import ColorPickerWithEyeDropper from './ColorPickerWithEyeDropper'
 interface RightSidebarProps {
   canvas: fabric.Canvas | null
   selectedObject: fabric.Object | null
-  onEnterCropMode?: (target: fabric.Object) => void
-  onEnterMagicWandMode?: (target: fabric.Object) => void
-  onEnterEraseMode?: (target: fabric.Object) => void
+  onOpenImageEdit?: (target: fabric.Image) => void
   zoom?: number
   onZoomChange?: (zoom: number) => void
 }
 
-export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, onEnterMagicWandMode, onEnterEraseMode, zoom = 1, onZoomChange }: RightSidebarProps) {
+export default function RightSidebar({ canvas, selectedObject, onOpenImageEdit, zoom = 1, onZoomChange }: RightSidebarProps) {
   // 所有Hooks必须在组件顶层调用
   // 面板状态
   const [activePanel, setActivePanel] = useState<'canvas' | 'text' | 'image' | 'shape' | null>(null);
@@ -1097,9 +1095,8 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
             block
             size="small"
             onClick={() => {
-              // 调用父组件的裁剪模式函数
-              if (onEnterCropMode) {
-                onEnterCropMode(imageObject);
+              if (onOpenImageEdit) {
+                onOpenImageEdit(imageObject, 'crop');
               }
             }}
           >
@@ -1111,13 +1108,25 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
             block
             size="small"
             onClick={() => {
-              // 调用父组件的魔法棒模式函数
-              if (onEnterMagicWandMode) {
-                onEnterMagicWandMode(imageObject);
+              if (onOpenImageEdit) {
+                onOpenImageEdit(imageObject, 'magicWand');
               }
             }}
           >
             魔法棒抠图
+          </Button>
+          
+          {/* 消除区域 */}
+          <Button
+            block
+            size="small"
+            onClick={() => {
+              if (onOpenImageEdit) {
+                onOpenImageEdit(imageObject, 'erase');
+              }
+            }}
+          >
+            消除区域
           </Button>
           
           {/* 复制 */}
@@ -1225,20 +1234,6 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
             }}
           >
             删除
-          </Button>
-          
-          {/* 消除某个区域 */}
-          <Button
-            block
-            size="small"
-            onClick={() => {
-              // 调用父组件的消除区域模式函数
-              if (onEnterEraseMode) {
-                onEnterEraseMode(imageObject);
-              }
-            }}
-          >
-            消除区域
           </Button>
         </div>
 
