@@ -444,57 +444,33 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
             icon={<DeleteOutlined />}
             onClick={() => {
               try {
-                console.log('【右侧边栏】删除按钮点击 - 文字编辑面板')
-                console.log('文字对象状态检查:', {
-                  exists: !!textObject,
-                  type: textObject?.type,
-                  canvasExists: !!canvas,
-                  activeObject: canvas?.getActiveObject()?.type || '无'
-                })
-                
                 // 确保文字对象和画布都存在
                 if (!textObject || !canvas) {
-                  console.error('无法删除: 文字对象或画布不存在')
                   message.error('请先选中有效的文字对象')
                   return
                 }
                 
                 // 确认文字对象是否为当前选中对象
                 const isActive = canvas.getActiveObject() === textObject;
-                console.log('文字对象是否为当前选中对象:', isActive)
                 
                 if (!isActive) {
                   // 如果不是当前选中对象，先将其设为选中
-                  console.log('设置文字对象为当前选中对象')
                   canvas.setActiveObject(textObject)
                   canvas.renderAll()
                 }
                 
-                console.log('开始删除文字对象:', {
-                  type: textObject.type,
-                  id: (textObject as any).id,
-                  left: textObject.left,
-                  top: textObject.top
-                })
-                
                 // 删除文字对象
                 canvas.remove(textObject)
-                console.log('文字对象已从画布移除')
                 
                 // 清除选中状态
                 canvas.discardActiveObject()
-                console.log('画布选中状态已清除')
                 
                 // 强制重新计算画布偏移并渲染
                 canvas.calcOffset()
-                console.log('画布偏移已重新计算')
-                
                 canvas.renderAll()
-                console.log('画布已重新渲染')
                 
                 // 手动触发画布变化事件，确保保存历史记录
                 setTimeout(() => {
-                  console.log('触发object:removed事件 - 文字对象')
                   canvas.fire('object:removed', { target: textObject });
                   
                   // 额外触发onChange事件确保状态更新
@@ -548,8 +524,10 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                 setFontSize(newSize)
                 updateText({ fontSize: newSize })
               }}
-              formatter={(value) => `${value}px`}
+              controls={true}
+              placeholder="输入字号"
             />
+            <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
           </Space.Compact>
         </div>
 
@@ -586,8 +564,10 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                 setLetterSpacing(newLetterSpacing)
                 updateText({ charSpacing: newLetterSpacing })
               }}
-              formatter={(value) => `${value}px`}
+              controls={true}
+              placeholder="输入字间距"
             />
+            <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
           </Space.Compact>
         </div>
 
@@ -724,8 +704,11 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                 onChange={(value) => {
                   updateText({ width: value || 0 })
                 }}
-                formatter={(value) => `${value}px`}
+                controls={true}
+                placeholder="宽度"
+                style={{ width: 120 }}
               />
+              <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
             </Space.Compact>
             <Space.Compact>
                 <span style={{ width: 40, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">高</span>
@@ -734,8 +717,11 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                   onChange={(value) => {
                     updateText({ height: value || 0 })
                   }}
-                  formatter={(value) => `${value}px`}
+                  controls={true}
+                  placeholder="高度"
+                  style={{ width: 120 }}
                 />
+                <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
               </Space.Compact>
           </Space>
         </div>
@@ -753,8 +739,11 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                   onChange={(value) => {
                     updateText({ left: value || 0 })
                   }}
-                  formatter={(value) => `${value}px`}
+                  controls={true}
+                  placeholder="X坐标"
+                  style={{ width: 120 }}
                 />
+                <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
               </Space.Compact>
             <Space.Compact>
                 <span style={{ width: 40, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">Y</span>
@@ -763,8 +752,11 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                   onChange={(value) => {
                     updateText({ top: value || 0 })
                   }}
-                  formatter={(value) => `${value}px`}
+                  controls={true}
+                  placeholder="Y坐标"
+                  style={{ width: 120 }}
                 />
+                <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
               </Space.Compact>
           </Space>
         </div>
@@ -1783,8 +1775,11 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                   const newScaleX = (value || originalWidth) / originalWidth;
                   updateImage({ scaleX: newScaleX });
                 }}
-                formatter={(value) => `${value}px`}
+                controls={true}
+                placeholder="宽度"
+                style={{ width: 120 }}
               />
+              <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
             </Space.Compact>
             <Space.Compact>
               <span style={{ width: 40, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">高</span>
@@ -1797,8 +1792,11 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                   const newScaleY = (value || originalHeight) / originalHeight;
                   updateImage({ scaleY: newScaleY });
                 }}
-                formatter={(value) => `${value}px`}
+                controls={true}
+                placeholder="高度"
+                style={{ width: 120 }}
               />
+              <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
             </Space.Compact>
           </Space>
         </div>
@@ -1816,8 +1814,11 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                   onChange={(value) => {
                     updateImage({ left: value || 0 })
                   }}
-                  formatter={(value) => `${value}px`}
+                  controls={true}
+                  placeholder="X坐标"
+                  style={{ width: 120 }}
                 />
+                <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
               </Space.Compact>
             <Space.Compact>
                 <span style={{ width: 40, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">Y</span>
@@ -1826,8 +1827,11 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                   onChange={(value) => {
                     updateImage({ top: value || 0 })
                   }}
-                  formatter={(value) => `${value}px`}
+                  controls={true}
+                  placeholder="Y坐标"
+                  style={{ width: 120 }}
                 />
+                <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
               </Space.Compact>
           </Space>
         </div>
@@ -2254,8 +2258,11 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                   setShapeWidth(newWidth)
                   updateShape({ width: newWidth })
                 }}
-                formatter={(value) => `${value}px`}
+                controls={true}
+                placeholder="宽度"
+                style={{ width: 120 }}
               />
+              <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
             </Space.Compact>
             <Space.Compact>
               <Input readOnly value="高" style={{ width: 40 }} />
@@ -2266,8 +2273,11 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                   setShapeHeight(newHeight)
                   updateShape({ height: newHeight })
                 }}
-                formatter={(value) => `${value}px`}
+                controls={true}
+                placeholder="高度"
+                style={{ width: 120 }}
               />
+              <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
             </Space.Compact>
           </Space>
         </div>
@@ -2287,8 +2297,11 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                   setShapeLeft(newLeft)
                   updateShape({ left: newLeft })
                 }}
-                formatter={(value) => `${value}px`}
+                controls={true}
+                placeholder="X坐标"
+                style={{ width: 120 }}
               />
+              <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
             </Space.Compact>
             <Space.Compact>
               <Input readOnly value="Y" style={{ width: 40 }} />
@@ -2299,8 +2312,11 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                   setShapeTop(newTop)
                   updateShape({ top: newTop })
                 }}
-                formatter={(value) => `${value}px`}
+                controls={true}
+                placeholder="Y坐标"
+                style={{ width: 120 }}
               />
+              <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
             </Space.Compact>
           </Space>
         </div>

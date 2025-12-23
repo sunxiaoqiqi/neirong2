@@ -161,11 +161,132 @@ export default function Editor() {
       // 清理画布的键盘事件监听器
       const keyHandler = (canvas as any)._deleteKeyHandler
       if (keyHandler) {
-        document.removeEventListener('keydown', keyHandler, true) // 保持与添加时相同的useCapture参数
+        window.removeEventListener('keydown', keyHandler, true)
+        document.removeEventListener('keydown', keyHandler, true)
+        const upperCanvasEl = canvas.upperCanvasEl
+        if (upperCanvasEl && (canvas as any)._deleteKeyHandlerUpper) {
+          upperCanvasEl.removeEventListener('keydown', keyHandler, true)
+        }
+        const containerEl = canvasElRef.current?.parentElement
+        if (containerEl && (canvas as any)._deleteKeyHandlerContainer) {
+          containerEl.removeEventListener('keydown', keyHandler, true)
+        }
         delete (canvas as any)._deleteKeyHandler
+        delete (canvas as any)._deleteKeyHandlerUpper
+        delete (canvas as any)._deleteKeyHandlerWindow
+        delete (canvas as any)._deleteKeyHandlerContainer
       }
     }
   }, [])
+
+  /* =========================
+     键盘删除功能（独立 useEffect）
+  ========================= */
+
+  useEffect(() => {
+    let handleKeyDown: ((e: KeyboardEvent) => void) | null = null
+    let timer: NodeJS.Timeout | null = null
+
+    // 使用 setTimeout 确保画布已经初始化
+    timer = setTimeout(() => {
+      const canvas = canvasRef.current
+      if (!canvas) {
+        return
+      }
+
+      handleKeyDown = (e: KeyboardEvent) => {
+        // 检查是否按下了删除键或退格键
+        if (e.key === 'Delete' || e.key === 'Backspace' || e.code === 'Delete' || e.code === 'Backspace') {
+          const target = e.target as HTMLElement
+          
+          // 检查是否是在输入框中按下的键，如果是则不处理
+          if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+            return
+          }
+          
+          const canvas = canvasRef.current
+          if (!canvas) return
+          
+          // 获取当前选中的对象
+          const activeObject = canvas.getActiveObject()
+          
+          // 如果没有选中对象，不处理
+          if (!activeObject) {
+            return
+          }
+          
+          // 检查文本对象是否正在编辑
+          if (activeObject.type === 'i-text' || activeObject.type === 'text' || activeObject.type === 'textbox') {
+            const textObject = activeObject as fabric.IText
+            // 如果文本对象正在编辑（有光标），不删除，让用户正常编辑
+            if (textObject.isEditing && textObject.hiddenTextarea) {
+              return
+            }
+          }
+          
+          // 如果处于绘制模式，不处理删除
+          if (canvas.isDrawingMode) {
+            return
+          }
+          
+          // 阻止默认行为（如浏览器后退等）
+          e.preventDefault()
+          e.stopPropagation()
+          e.stopImmediatePropagation()
+          
+          try {
+            // 处理多选对象（activeSelection）
+            if (activeObject.type === 'activeSelection') {
+              const activeSelection = activeObject as fabric.ActiveSelection
+              const objects = activeSelection.getObjects()
+              
+              // 删除所有选中的对象
+              objects.forEach((obj: fabric.Object) => {
+                canvas.remove(obj)
+              })
+              
+              // 清除选择状态
+              canvas.discardActiveObject()
+              canvas.renderAll()
+              
+              // 触发变更处理
+              if (isApplyingRef.current) return
+              syncCanvasToPage(true, true)
+              setHasUnsavedChanges(true)
+            } else {
+              // 删除单个选中的对象
+              canvas.remove(activeObject)
+              
+              // 清除选择状态
+              canvas.discardActiveObject()
+              
+              // 重新渲染画布
+              canvas.renderAll()
+              
+              // 触发变更处理（会自动触发 object:removed 事件）
+              if (isApplyingRef.current) return
+              syncCanvasToPage(true, true)
+              setHasUnsavedChanges(true)
+            }
+          } catch (error) {
+            console.error('删除对象过程中出错:', error)
+          }
+        }
+      }
+
+      // 添加全局键盘事件监听（使用捕获阶段，确保优先处理）
+      window.addEventListener('keydown', handleKeyDown, true)
+      document.addEventListener('keydown', handleKeyDown, true)
+    }, 100) // 延迟100ms确保画布已初始化
+
+    return () => {
+      if (timer) clearTimeout(timer)
+      if (handleKeyDown) {
+        window.removeEventListener('keydown', handleKeyDown, true)
+        document.removeEventListener('keydown', handleKeyDown, true)
+      }
+    }
+  }, []) // 只在组件挂载时添加一次
 
   /* =========================
      Fabric 事件绑定
@@ -175,6 +296,14 @@ export default function Editor() {
     canvas.on('selection:created', e => setSelectedObject(e.selected?.[0] || null))
     canvas.on('selection:updated', e => setSelectedObject(e.selected?.[0] || null))
     canvas.on('selection:cleared', () => setSelectedObject(null))
+    
+    // 点击画布时自动聚焦，确保键盘事件能正常工作
+    canvas.on('mouse:down', () => {
+      const upperCanvasEl = canvas.upperCanvasEl
+      if (upperCanvasEl) {
+        upperCanvasEl.focus()
+      }
+    })
 
     const onChange = () => {
       if (isApplyingRef.current) return
@@ -186,86 +315,6 @@ export default function Editor() {
     canvas.on('object:modified', onChange)
     canvas.on('object:removed', onChange)
     canvas.on('text:changed', onChange)
-    
-    // 添加键盘删除事件处理
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // 详细的键盘事件日志，包括按键状态和事件目标
-      const target = e.target as HTMLElement
-      console.log('键盘事件触发:', { 
-        key: e.key, 
-        code: e.code,
-        target: target.tagName,
-        isContentEditable: target.isContentEditable,
-        selectedObject: canvas.getActiveObject() ? canvas.getActiveObject().type : '无',
-        drawingMode: canvas.isDrawingMode,
-        eventPhase: e.eventPhase // 记录事件传播阶段
-      })
-      
-      // 检查是否按下了删除键或退格键
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        // 获取当前选中的对象
-        const activeObject = canvas.getActiveObject()
-        
-        // 检查是否是在输入框中按下的键，如果是则不处理
-        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
-          console.log('在输入区域按下删除键，跳过处理')
-          return
-        }
-        
-        // 如果有选中的对象且不是处于文本编辑模式
-        if (activeObject && !canvas.isDrawingMode) {
-          console.log('准备删除对象:', {
-            type: activeObject.type,
-            id: (activeObject as any).id,
-            left: activeObject.left,
-            top: activeObject.top
-          })
-          
-          // 阻止默认行为（如浏览器后退等）
-          e.preventDefault()
-          
-          try {
-            // 删除选中的对象
-            canvas.remove(activeObject)
-            console.log('对象已从画布移除')
-            
-            // 清除选择状态
-            canvas.discardActiveObject()
-            console.log('选中状态已清除')
-            
-            // 强制重新计算画布偏移
-            canvas.calcOffset()
-            console.log('画布偏移已重新计算')
-            
-            // 重新渲染画布
-            canvas.renderAll()
-            console.log('画布已重新渲染')
-            
-            // 触发对象移除事件，确保历史记录更新
-            setTimeout(() => {
-              console.log('触发object:removed事件')
-              canvas.fire('object:removed', { target: activeObject })
-            }, 0)
-            
-            // 手动触发变更处理
-            setTimeout(() => {
-              console.log('调用onChange()更新状态')
-              onChange()
-            }, 10)
-          } catch (error) {
-            console.error('删除对象过程中出错:', error)
-          }
-        } else {
-          console.log('不满足删除条件:', { hasActiveObject: !!activeObject, isDrawingMode: canvas.isDrawingMode })
-        }
-      }
-    }
-    
-    // 添加全局键盘事件监听
-    document.addEventListener('keydown', handleKeyDown, true) // 添加useCapture参数确保事件能被捕获
-    
-    // 保存事件监听器引用，以便在需要时移除
-    ;(canvas as any)._deleteKeyHandler = handleKeyDown
   }
 
   /* =========================
@@ -344,8 +393,20 @@ export default function Editor() {
     // 清理之前的键盘事件监听器，防止内存泄漏
     const prevKeyHandler = (canvas as any)._deleteKeyHandler
     if (prevKeyHandler) {
-      document.removeEventListener('keydown', prevKeyHandler, true) // 保持与添加时相同的useCapture参数
+      window.removeEventListener('keydown', prevKeyHandler, true)
+      document.removeEventListener('keydown', prevKeyHandler, true)
+      const upperCanvasEl = canvas.upperCanvasEl
+      if (upperCanvasEl && (canvas as any)._deleteKeyHandlerUpper) {
+        upperCanvasEl.removeEventListener('keydown', prevKeyHandler, true)
+      }
+      const containerEl = canvasElRef.current?.parentElement
+      if (containerEl && (canvas as any)._deleteKeyHandlerContainer) {
+        containerEl.removeEventListener('keydown', prevKeyHandler, true)
+      }
       delete (canvas as any)._deleteKeyHandler
+      delete (canvas as any)._deleteKeyHandlerUpper
+      delete (canvas as any)._deleteKeyHandlerWindow
+      delete (canvas as any)._deleteKeyHandlerContainer
     }
 
     canvas.clear()
@@ -421,11 +482,6 @@ export default function Editor() {
       return
     }
     
-    console.log(`切换到画布 ${idx + 1}:`, {
-      id: targetPage.id,
-      hasJson: !!targetPage.json,
-      jsonLength: targetPage.json?.length || 0
-    })
     
     syncCanvasToPage(false, true)
     setCurrentPageIndex(idx)
@@ -456,10 +512,9 @@ export default function Editor() {
   ========================= */
 
   const addText = (type: 'title' | 'subtitle' | 'body' | 'transform' | '3d' | string = 'body') => {
-    console.log(`[调试] 开始添加文字，类型: ${type}`)
     const canvas = canvasRef.current
     if (!canvas) {
-      console.error('[调试] 画布未初始化')
+      console.error('画布未初始化')
       return
     }
     
@@ -474,12 +529,8 @@ export default function Editor() {
       }
       
       const config = baseConfig[type as keyof typeof baseConfig] || baseConfig.body
-      console.log(`[调试] 使用配置:`, config)
       
-      // 使用最基本的属性创建文本对象，确保最大兼容性
-      console.log(`[调试] 创建文字对象，类型: ${type}`)
-      
-      // 为避免特殊效果导致问题，先创建完全基础的文本对象
+      // 创建文本对象
       const textObj = new fabric.Textbox(config.content, {
         left: CANVAS_WIDTH / 2,  // 水平居中
         top: config.y,           // 垂直位置错开
@@ -490,47 +541,26 @@ export default function Editor() {
         fill: config.color,      // 使用基本颜色
         textAlign: 'center' as const,  // 全部居中对齐
         width: 500,              // 统一宽度以确保文本换行行为一致
-        // 添加ID以便于调试
         id: `text_${type}_${Date.now()}`
       })
       
-      // 记录创建的对象信息
-      console.log(`[调试] 文字对象已创建，属性:`, {
-        id: textObj.id,
-        text: textObj.text,
-        type: textObj.type,
-        left: textObj.left,
-        top: textObj.top
-      })
-      
-      // 直接添加到画布，不应用任何特殊效果以确保基础功能正常
-      console.log(`[调试] 准备添加到画布`)
+      // 添加到画布
       canvas.add(textObj)
-      
-      // 确认已添加到画布
-      const objects = canvas.getObjects()
-      console.log(`[调试] 画布对象数量: ${objects.length}`)
       
       // 选中对象
       canvas.setActiveObject(textObj)
       
       // 强制渲染画布
-      console.log(`[调试] 渲染画布`)
       canvas.renderAll()
       
       // 额外的刷新步骤
       setTimeout(() => {
-        console.log(`[调试] 额外渲染确保显示`)
         canvas.renderAll()
       }, 50)
     } catch (error: any) {
-      console.error('[调试] 添加文字时出错:', error)
-      if (error.message) {
-        console.error('[调试] 错误详情:', error.message)
-      }
+      console.error('添加文字时出错:', error)
       message.error(`添加文字失败: ${error.message || '未知错误'}`)
     }
-    console.log('[调试] 文字添加流程结束')
   }
 
   /* =========================
@@ -553,18 +583,10 @@ export default function Editor() {
     maxWidth: number,
     padding: number
   ): Array<{ obj: fabric.Object; height: number; nextY: number }> => {
-    console.log('开始解析 HTML:', html.substring(0, 200))
     const div = document.createElement('div')
     div.innerHTML = html
     const objects: Array<{ obj: fabric.Object; height: number; nextY: number }> = []
     let currentY = startY
-    
-    console.log('解析后的 DOM 结构:', {
-      childrenCount: div.children.length,
-      childNodesCount: div.childNodes.length,
-      textContent: div.textContent?.substring(0, 100),
-      innerHTML: div.innerHTML.substring(0, 200)
-    })
 
     // 递归处理所有节点，包括文本节点
     const processNode = (node: Node, depth: number = 0): void => {
@@ -577,7 +599,6 @@ export default function Editor() {
           const parent = node.parentElement
           const parentTag = parent?.tagName.toLowerCase()
           if (!parent || !['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'div', 'li'].includes(parentTag || '')) {
-            console.log(`${indent}创建文本对象: "${text.substring(0, 30)}"`)
             const fontSize = parseInt(String(themeStyles.content.fontSize).replace('px', '')) || 16
             const lineHeight = themeStyles.container.lineHeight as number || 1.8
             const textObj = new fabric.Textbox(text, {
@@ -611,7 +632,6 @@ export default function Editor() {
         const tagName = element.tagName.toLowerCase()
         const text = element.textContent?.trim() || ''
         
-        console.log(`${indent}处理元素: <${tagName}> 文本长度: ${text.length}`)
 
         // 处理列表元素
         if (tagName === 'ul' || tagName === 'ol') {
@@ -808,7 +828,6 @@ export default function Editor() {
           }
         } else if (tagName === 'div') {
           // div 容器，递归处理所有子节点
-          console.log(`${indent}div 容器，递归处理子节点 (${element.childNodes.length} 个子节点)`)
           Array.from(element.childNodes).forEach(child => processNode(child, depth + 1))
         } else if (['span', 'strong', 'em', 'b', 'i', 'a', 'code', 'sup'].includes(tagName)) {
           // 内联元素，不单独创建对象，文本会被父元素处理
@@ -817,7 +836,6 @@ export default function Editor() {
         } else {
           // 其他元素，如果有文本内容就处理，否则递归处理子节点
           if (text) {
-            console.log(`${indent}其他元素 <${tagName}> 有文本，创建对象`)
             const fontSize = parseInt(String(themeStyles.content.fontSize).replace('px', '')) || 16
             const lineHeight = themeStyles.container.lineHeight as number || 1.8
             const textObj = new fabric.Textbox(text, {
@@ -846,7 +864,6 @@ export default function Editor() {
             currentY = nextY
           } else {
             // 递归处理子节点
-            console.log(`${indent}其他元素 <${tagName}> 无文本，递归处理子节点`)
             Array.from(element.childNodes).forEach(child => processNode(child, depth + 1))
           }
         }
@@ -854,14 +871,10 @@ export default function Editor() {
     }
 
     // 处理所有节点（包括文本节点和元素节点）
-    console.log('开始处理节点，子节点数量:', div.childNodes.length)
     Array.from(div.childNodes).forEach(node => processNode(node, 0))
-    
-    console.log(`处理节点后得到 ${objects.length} 个对象`)
     
     // 如果处理后没有对象，尝试直接提取文本
     if (objects.length === 0 && div.textContent?.trim()) {
-      console.log('没有解析到对象，使用纯文本:', div.textContent.substring(0, 100))
       const text = div.textContent.trim()
       const fontSize = parseInt(String(themeStyles.content.fontSize).replace('px', '')) || 16
       const lineHeight = themeStyles.container.lineHeight as number || 1.8
@@ -890,10 +903,6 @@ export default function Editor() {
       objects.push({ obj: textObj, height, nextY })
     }
 
-    console.log(`parseHtmlToFabricObjects 返回 ${objects.length} 个对象:`, objects.map(o => ({
-      text: (o.obj as any).text?.substring(0, 30),
-      type: o.obj.type
-    })))
     return objects
   }
 
@@ -937,10 +946,8 @@ export default function Editor() {
         // 切换到对应页面
         if (i !== currentPageIndexRef.current) {
           // 先保存当前页面
-          console.log(`从页面 ${currentPageIndexRef.current} 切换到页面 ${i}`)
           syncCanvasToPage(false, true)
           // 切换到目标页面
-          const prevIndex = currentPageIndexRef.current
           currentPageIndexRef.current = i
           setCurrentPageIndex(i)
           // 等待状态更新
@@ -948,16 +955,11 @@ export default function Editor() {
           
           // 验证切换是否成功
           if (currentPageIndexRef.current !== i) {
-            console.error(`页面切换失败！期望: ${i}, 实际: ${currentPageIndexRef.current}`)
             currentPageIndexRef.current = i
           }
           
-          console.log(`已切换到页面 ${i}, 页面 ID: ${pagesRef.current[i]?.id}`)
-          
           // 注意：这里不调用 renderPageToCanvas，因为我们要直接操作画布添加新内容
           // 只需要确保画布引用已更新即可
-        } else {
-          console.log(`已在页面 ${i}，无需切换`)
         }
 
         const currentCanvas = canvasRef.current
@@ -966,19 +968,14 @@ export default function Editor() {
           continue
         }
 
-        console.log(`页面 ${i}: 开始处理，画布对象数量: ${currentCanvas.getObjects().length}`)
-
         // 清空当前画布
         currentCanvas.clear()
-        console.log(`页面 ${i}: 画布已清空`)
 
         // 设置画布背景色
         currentCanvas.setBackgroundColor(
           themeStyles.container.backgroundColor as string || '#ffffff',
           () => currentCanvas.renderAll()
         )
-        
-        console.log(`页面 ${i}: 画布已清空，准备添加内容`)
 
         // 添加标题（只在第一页添加）
         if (i === 0) {
@@ -1004,7 +1001,6 @@ export default function Editor() {
 
         // 如果有 HTML 内容，解析 HTML；否则使用纯文本
         if (pageData.htmlContent) {
-          console.log('解析 HTML 内容 (长度:', pageData.htmlContent.length, '):', pageData.htmlContent.substring(0, 300))
           const fabricObjects = parseHtmlToFabricObjects(
             pageData.htmlContent,
             themeStyles,
@@ -1012,16 +1008,8 @@ export default function Editor() {
             maxWidth,
             padding
           )
-          
-          console.log(`解析到 ${fabricObjects.length} 个对象:`, fabricObjects.map((o, idx) => ({
-            index: idx,
-            text: (o.obj as any).text?.substring(0, 50) || '空文本',
-            type: o.obj.type,
-            height: o.height
-          })))
 
           if (fabricObjects.length === 0) {
-            console.warn('警告：HTML 解析后没有对象，尝试使用纯文本')
             // 如果 HTML 解析失败，回退到纯文本
             const paragraphs = pageData.content.split(/\n\n+/).filter(p => p.trim())
             for (const para of paragraphs) {
@@ -1045,8 +1033,6 @@ export default function Editor() {
               if (currentY > CANVAS_HEIGHT - 40) break
             }
           } else {
-            console.log(`准备添加 ${fabricObjects.length} 个对象到画布`)
-            
             // 先创建所有对象，设置初始位置（在画布外，避免闪烁）
             const objectsToAdd: Array<{ obj: fabric.Object; initialTop: number }> = []
             for (const { obj } of fabricObjects) {
@@ -1054,10 +1040,7 @@ export default function Editor() {
               obj.set('top', -1000) // 先放在画布外
               objectsToAdd.push({ obj, initialTop: currentY })
               currentCanvas.add(obj)
-              console.log(`已添加对象到画布: "${(obj as any).text?.substring(0, 30)}"`)
             }
-            
-            console.log(`画布对象数量: ${currentCanvas.getObjects().length}`)
             
             // 渲染一次以让 Fabric.js 计算实际尺寸
             currentCanvas.renderAll()
@@ -1071,9 +1054,7 @@ export default function Editor() {
               let actualHeight = 0
               try {
                 actualHeight = obj.calcTextHeight() || 0
-                console.log(`对象 ${idx} calcTextHeight: ${actualHeight}`)
               } catch (e) {
-                console.warn(`对象 ${idx} calcTextHeight 失败:`, e)
                 // 如果 calcTextHeight 失败，尝试其他方法
                 actualHeight = (obj as any).height || 0
               }
@@ -1086,10 +1067,7 @@ export default function Editor() {
                 const charWidth = fontSize * 0.7
                 const estimatedLines = Math.max(1, Math.ceil((text.length * charWidth) / maxWidth))
                 actualHeight = estimatedLines * fontSize * lineHeight
-                console.log(`对象 ${idx} 使用估算高度: ${actualHeight} (字体: ${fontSize}, 文本长度: ${text.length})`)
               }
-              
-              console.log(`对象 ${idx}: 文本="${(obj as any).text?.substring(0, 30)}", 高度=${actualHeight}, 位置=${actualCurrentY}, left=${obj.left}`)
               
               // 设置正确的位置
               obj.set({
@@ -1107,7 +1085,6 @@ export default function Editor() {
 
               // 如果超出画布高度，移除后续对象
               if (actualCurrentY > CANVAS_HEIGHT - 40) {
-                console.log(`位置 ${actualCurrentY} 超出画布高度 ${CANVAS_HEIGHT - 40}，移除后续对象`)
                 for (let j = idx + 1; j < objectsToAdd.length; j++) {
                   currentCanvas.remove(objectsToAdd[j].obj)
                 }
@@ -1115,19 +1092,8 @@ export default function Editor() {
               }
             }
             
-            console.log(`最终画布对象数量: ${currentCanvas.getObjects().length}`)
-            console.log(`最终画布对象列表:`, currentCanvas.getObjects().map((o: any, i: number) => ({
-              index: i,
-              type: o.type,
-              text: o.text?.substring(0, 30),
-              top: o.top,
-              left: o.left,
-              visible: o.visible
-            })))
-            
             // 最终渲染
             currentCanvas.renderAll()
-            console.log(`页面 ${i} 渲染完成`)
           }
         } else {
           // 使用纯文本（向后兼容）
@@ -1163,33 +1129,13 @@ export default function Editor() {
         }
 
         // 保存当前页面（确保所有对象都被保存）
-        console.log(`页面 ${i}: 保存前，画布对象数量: ${currentCanvas.getObjects().length}`)
-        console.log(`页面 ${i}: 当前页面索引 ref: ${currentPageIndexRef.current}, 目标索引: ${i}`)
-        
         // 确保 currentPageIndexRef 指向正确的页面
         if (currentPageIndexRef.current !== i) {
-          console.warn(`页面索引不匹配！ref=${currentPageIndexRef.current}, 目标=${i}`)
           currentPageIndexRef.current = i
         }
         
         syncCanvasToPage(true, true)
         currentCanvas.renderAll()
-        
-        // 验证保存是否成功
-        const savedPage = pagesRef.current[i]
-        if (savedPage) {
-          const savedJson = safeParse(savedPage.json)
-          const savedObjects = savedJson?.objects || []
-          console.log(`页面 ${i}: 保存后，JSON 中的对象数量: ${savedObjects.length}`)
-          console.log(`页面 ${i}: 保存的页面 ID: ${savedPage.id}`)
-          
-          // 验证保存的对象类型
-          if (savedObjects.length > 0) {
-            console.log(`页面 ${i}: 第一个对象类型: ${savedObjects[0].type}, 文本: ${(savedObjects[0] as any).text?.substring(0, 30)}`)
-          }
-        } else {
-          console.error(`页面 ${i}: 保存失败，页面不存在`)
-        }
       }
 
       // 切换回第一页并渲染
@@ -1238,14 +1184,244 @@ export default function Editor() {
     return { el, canvas }
   }
 
+  // 将图片 URL 转换为 base64
+  const imageUrlToBase64 = (url: string): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      // 如果已经是 base64，直接返回
+      if (url.startsWith('data:')) {
+        resolve(url)
+        return
+      }
+
+      // 处理相对路径，转换为完整 URL
+      let fullUrl = url
+      if (url.startsWith('/')) {
+        fullUrl = `${window.location.origin}${url}`
+      } else if (url.startsWith('./') || (!url.startsWith('http') && !url.startsWith('blob:'))) {
+        fullUrl = `${window.location.origin}${url.startsWith('./') ? url.substring(1) : '/' + url}`
+      }
+
+      const img = new Image()
+      // blob URL 不需要 crossOrigin
+      if (!url.startsWith('blob:')) {
+        img.crossOrigin = 'anonymous'
+      }
+      
+      const timeout = setTimeout(() => {
+        reject(new Error('图片加载超时'))
+      }, 15000) // 15秒超时
+      
+      img.onload = () => {
+        clearTimeout(timeout)
+        try {
+          const canvas = document.createElement('canvas')
+          canvas.width = img.naturalWidth
+          canvas.height = img.naturalHeight
+          const ctx = canvas.getContext('2d')
+          if (ctx) {
+            ctx.drawImage(img, 0, 0)
+            const base64 = canvas.toDataURL('image/png')
+            resolve(base64)
+          } else {
+            reject(new Error('无法创建 canvas context'))
+          }
+        } catch (error) {
+          reject(error)
+        }
+      }
+      
+      img.onerror = () => {
+        clearTimeout(timeout)
+        console.warn('图片加载失败:', fullUrl)
+        // 对于 blob URL，如果加载失败，尝试从原始画布获取
+        if (url.startsWith('blob:')) {
+          reject(new Error('blob URL 已失效'))
+        } else {
+          // 如果加载失败，返回原始 URL（可能是网络问题）
+          resolve(fullUrl)
+        }
+      }
+      
+      img.src = fullUrl
+    })
+  }
+
+  // 从画布元素获取 base64
+  const getImageBase64FromCanvas = (img: fabric.Image): Promise<string | null> => {
+    return new Promise((resolve) => {
+      try {
+        const imgElement = img.getElement()
+        if (imgElement && imgElement.tagName === 'IMG') {
+          const htmlImg = imgElement as HTMLImageElement
+          if (htmlImg.complete && htmlImg.naturalWidth > 0) {
+            // 图片已加载，直接转换为 base64
+            const canvas = document.createElement('canvas')
+            canvas.width = htmlImg.naturalWidth
+            canvas.height = htmlImg.naturalHeight
+            const ctx = canvas.getContext('2d')
+            if (ctx) {
+              ctx.drawImage(htmlImg, 0, 0)
+              const base64 = canvas.toDataURL('image/png')
+              resolve(base64)
+              return
+            }
+          }
+        }
+        resolve(null)
+      } catch (error) {
+        console.warn('从画布获取图片失败:', error)
+        resolve(null)
+      }
+    })
+  }
+
   const renderPageToTempCanvas = async (
     page: PageModel,
     canvas: fabric.Canvas
   ) => {
-    const parsed = JSON.parse(page.json)
+    let parsed = JSON.parse(page.json)
+    
+    // ⭐ 关键修复：在 loadFromJSON 之前处理所有 blob URL，转换为 base64
+    // 首先尝试从原始画布获取图片数据（如果当前页面匹配）
+    const currentPageIndex = currentPageIndexRef.current
+    const currentPage = pagesRef.current[currentPageIndex]
+    const isCurrentPage = currentPage && currentPage.id === page.id
+    
+    if (parsed.objects && Array.isArray(parsed.objects)) {
+      const imagePromises: Promise<void>[] = []
+      
+      for (let i = 0; i < parsed.objects.length; i++) {
+        const obj = parsed.objects[i]
+        if (obj.type === 'image' && obj.src) {
+          const imgSrc = obj.src
+          
+          // 检查是否需要转换为 base64（blob URL、相对路径等）
+          const needsConversion = 
+            imgSrc.startsWith('blob:') || 
+            imgSrc.startsWith('/') || 
+            (!imgSrc.startsWith('http') && !imgSrc.startsWith('data:'))
+          
+          if (needsConversion) {
+            const promise = (async () => {
+              try {
+                let base64Url: string | null = null
+                
+                // 如果是当前页面且是 blob URL，尝试从原始画布获取
+                if (isCurrentPage && imgSrc.startsWith('blob:') && canvasRef.current) {
+                  const objects = canvasRef.current.getObjects()
+                  const originalImg = objects.find((o: any) => {
+                    if (o.type === 'image') {
+                      const originalSrc = o.getElement()?.src || (o as any).src
+                      return originalSrc === imgSrc || 
+                             (Math.abs((o.left || 0) - (obj.left || 0)) < 1 && 
+                              Math.abs((o.top || 0) - (obj.top || 0)) < 1)
+                    }
+                    return false
+                  }) as fabric.Image | undefined
+                  
+                  if (originalImg) {
+                    base64Url = await getImageBase64FromCanvas(originalImg)
+                  }
+                }
+                
+                // 如果从画布获取失败，尝试从 URL 加载
+                if (!base64Url) {
+                  base64Url = await imageUrlToBase64(imgSrc)
+                }
+                
+                if (base64Url) {
+                  // 更新 JSON 中的图片 URL
+                  parsed.objects[i].src = base64Url
+                }
+              } catch (error) {
+                console.warn('图片转换失败:', imgSrc, error)
+                // 即使失败也继续，避免阻塞导出
+              }
+            })()
+            imagePromises.push(promise)
+          }
+        }
+      }
+      
+      // 等待所有图片转换完成
+      if (imagePromises.length > 0) {
+        await Promise.all(imagePromises)
+      }
+    }
+    
     return new Promise<void>(resolve => {
-      canvas.loadFromJSON(parsed, () => {
+      canvas.loadFromJSON(parsed, async () => {
+        // 等待所有图片元素加载完成
+        const objects = canvas.getObjects()
+        const imagePromises: Promise<void>[] = []
+        
+        for (const obj of objects) {
+          if (obj.type === 'image') {
+            const img = obj as fabric.Image
+            const imgElement = img.getElement()
+            
+            if (imgElement) {
+              // 设置 crossOrigin 以支持跨域图片
+              if (imgElement.tagName === 'IMG' && !imgElement.crossOrigin) {
+                imgElement.crossOrigin = 'anonymous'
+              }
+              
+              // 等待图片加载完成
+              const promise = new Promise<void>((imgResolve) => {
+                if (imgElement.complete && imgElement.naturalWidth > 0 && imgElement.naturalHeight > 0) {
+                  // 图片已经加载完成
+                  imgResolve()
+                } else {
+                  const timeout = setTimeout(() => {
+                    console.warn('图片加载超时')
+                    imgResolve()
+                  }, 10000)
+                  
+                  const onLoad = () => {
+                    clearTimeout(timeout)
+                    imgElement.removeEventListener('load', onLoad)
+                    imgElement.removeEventListener('error', onError)
+                    imgResolve()
+                  }
+                  
+                  const onError = () => {
+                    clearTimeout(timeout)
+                    imgElement.removeEventListener('load', onLoad)
+                    imgElement.removeEventListener('error', onError)
+                    console.warn('图片加载失败:', imgElement.src)
+                    imgResolve()
+                  }
+                  
+                  imgElement.addEventListener('load', onLoad)
+                  imgElement.addEventListener('error', onError)
+                  
+                  // 如果图片还没有开始加载，触发加载
+                  if (!imgElement.complete) {
+                    const currentSrc = imgElement.src
+                    imgElement.src = ''
+                    imgElement.src = currentSrc
+                  }
+                }
+              })
+              imagePromises.push(promise)
+            }
+          }
+        }
+        
+        // 等待所有图片加载完成
+        if (imagePromises.length > 0) {
+          await Promise.all(imagePromises)
+        }
+        
+        // 添加短暂延迟，确保图片完全渲染到画布
+        await new Promise(r => setTimeout(r, 300))
+        
+        // 重新渲染以确保图片正确显示
         canvas.renderAll()
+        
+        // 再次等待一小段时间，确保渲染完成
+        await new Promise(r => setTimeout(r, 200))
+        
         resolve()
       })
     })
@@ -1319,10 +1495,8 @@ export default function Editor() {
   const loadWork = async (wid: string) => {
     try {
       const w = (await workService.getWork(Number(wid))) as any
-      console.log('加载作品数据:', w)
       
       if (!w || !w.canvasData) {
-        console.warn('作品数据为空，使用默认画布')
         return
       }
       
@@ -1333,7 +1507,6 @@ export default function Editor() {
         if (canvasDataStr.startsWith('"') && canvasDataStr.endsWith('"')) {
           try {
             canvasDataStr = JSON.parse(canvasDataStr)
-            console.log('解除了双重转义')
           } catch {
             // 如果解析失败，使用原始字符串
           }
@@ -1341,8 +1514,6 @@ export default function Editor() {
       }
       
       const parsed = safeParse(canvasDataStr)
-      console.log('解析后的画布数据:', parsed)
-      console.log('是否为数组:', Array.isArray(parsed))
       
       if (!parsed) {
         console.error('画布数据解析失败')
@@ -1352,7 +1523,6 @@ export default function Editor() {
 
       if (Array.isArray(parsed)) {
         if (parsed.length === 0) {
-          console.warn('画布数据为空数组，使用默认画布')
           return
         }
         // 验证数组中的每个元素是否有正确的结构
@@ -1366,14 +1536,12 @@ export default function Editor() {
           return
         }
         
-        console.log(`成功加载 ${validPages.length} 个画布`)
         setPages(validPages)
         pagesRef.current = validPages
         setCurrentPageIndex(0)
         renderPageToCanvas(validPages[0])
       } else if (typeof parsed === 'object' && parsed !== null) {
         // 兼容单个画布对象的情况
-        console.log('检测到单个画布对象，转换为数组格式')
         const singlePage = {
           id: parsed.id || uuid(),
           json: parsed.json || (typeof parsed === 'string' ? parsed : JSON.stringify(parsed)),
@@ -1409,7 +1577,6 @@ export default function Editor() {
       
       // 确保 pagesRef.current 是最新的
       const pagesToSave = pagesRef.current
-      console.log('准备保存的画布数据:', pagesToSave)
       
       if (!pagesToSave || pagesToSave.length === 0) {
         message.warning('没有可保存的画布数据')
@@ -1432,7 +1599,6 @@ export default function Editor() {
       }
       
       const payload = JSON.stringify(validPages)
-      console.log('保存的数据长度:', payload.length, '画布数量:', validPages.length)
       setCanvasData(payload)
 
       if (id) {
@@ -1440,11 +1606,9 @@ export default function Editor() {
           canvasData: payload,
           ...(name && { name }),
         })
-        console.log('作品已更新，ID:', id)
       } else {
         if (!name) return setSaveModalVisible(true)
         const result = await workService.createWork({ name, canvasData: payload })
-        console.log('新作品已创建:', result)
         // 如果创建成功，更新 URL 中的 ID
         if (result?.data?.id) {
           navigate(`/editor/${result.data.id}`, { replace: true })
@@ -1508,18 +1672,12 @@ export default function Editor() {
       
       // 检查 thumbnailUrl 长度，如果太长则截断或移除
       if (thumbnailUrl && thumbnailUrl.length > 100000) {
-        console.warn('缩略图数据太长，将被截断或移除')
         // 可以选择截断或移除
         thumbnailUrl = undefined // 或者截断: thumbnailUrl.substring(0, 100000)
       }
       
       // 保存为模板
       const canvasDataStr = JSON.stringify(validPages)
-      console.log('准备保存模板:', { 
-        name: templateName.trim(), 
-        canvasDataLength: canvasDataStr.length,
-        thumbnailUrlLength: thumbnailUrl?.length || 0
-      })
       
       await templateService.createTemplate({
         name: templateName.trim(),
@@ -1546,7 +1704,6 @@ export default function Editor() {
 
   const handleApplyTemplate = async (templateData: string) => {
     try {
-      console.log('收到模板数据:', templateData)
       
       // 处理双重转义的 JSON 字符串
       let canvasDataStr = templateData
@@ -1555,7 +1712,6 @@ export default function Editor() {
         if (canvasDataStr.startsWith('"') && canvasDataStr.endsWith('"')) {
           try {
             canvasDataStr = JSON.parse(canvasDataStr)
-            console.log('解除了双重转义')
           } catch {
             // 如果解析失败，使用原始字符串
           }
@@ -1563,7 +1719,6 @@ export default function Editor() {
       }
       
       const parsed = safeParse(canvasDataStr)
-      console.log('解析后的模板数据:', parsed)
       
       if (!parsed) {
         message.error('模板数据格式错误')
@@ -1586,20 +1741,10 @@ export default function Editor() {
           return
         }
         
-        console.log(`成功加载模板，包含 ${validPages.length} 个画布`)
-        console.log('模板画布数据:', validPages.map((p: any, i: number) => ({
-          index: i,
-          id: p.id,
-          hasJson: !!p.json,
-          jsonLength: p.json?.length || 0
-        })))
-        
         const currentIdx = currentPageIndexRef.current
-        console.log(`当前画布索引: ${currentIdx}`)
         
         // 如果模板只有一个画布，应用到当前选中的画布
         if (validPages.length === 1) {
-          console.log('模板只有一个画布，应用到当前画布')
           
           // 先同步当前画布状态
           syncCanvasToPage(false, true)
@@ -1633,7 +1778,6 @@ export default function Editor() {
           }
         } else {
           // 如果模板有多个画布，替换所有画布（原有逻辑）
-          console.log('模板有多个画布，替换所有画布')
           
           setPages(validPages)
           pagesRef.current = validPages
@@ -1650,7 +1794,6 @@ export default function Editor() {
         }
       } else if (typeof parsed === 'object' && parsed !== null) {
         // 兼容单个画布对象的情况
-        console.log('检测到单个画布对象，转换为数组格式')
         const singlePage = {
           id: parsed.id || uuid(),
           json: parsed.json || (typeof parsed === 'string' ? parsed : JSON.stringify(parsed)),
@@ -1677,7 +1820,6 @@ export default function Editor() {
    ========================= */
   
   const addImage = async (imageUrl: string) => {
-    console.log('开始添加图片:', imageUrl)
     const canvas = canvasRef.current
     if (!canvas) {
       console.error('Canvas未初始化')
@@ -1718,10 +1860,8 @@ export default function Editor() {
       // 尝试验证图片URL
       try {
         await Promise.race([loadPromise, timeoutPromise])
-        console.log('图片URL验证成功')
       } catch (validationError) {
         // 如果直接加载失败，尝试创建一个备用方案
-        console.warn('直接图片验证失败，尝试备用方案:', validationError.message)
         
         // 对于开发环境，我们可以提供一个备用图片用于演示
         // 这个图片URL应该指向一个可靠的公共图片服务
@@ -1738,7 +1878,6 @@ export default function Editor() {
 
       // 使用fabric.js创建图片对象
       fabric.Image.fromURL(imageUrl, (img) => {
-        console.log('图片加载成功，原始尺寸:', { width: img.width, height: img.height })
         setupAndAddImageToCanvas(img, canvas)
         message.success('图片添加成功')
       }, options)
@@ -1877,7 +2016,6 @@ export default function Editor() {
             
             // 重要：如果目标画布不是当前画布，先保存当前画布的状态
             if (canvasIndex !== originalIndex) {
-              console.log(`切换前保存画布 ${originalIndex + 1} 的状态`)
               syncCanvasToPage(false, true) // 保存当前画布，不推入历史，更新缩略图
             }
             
@@ -1892,11 +2030,9 @@ export default function Editor() {
               
               // 验证当前画布索引是否正确，如果不匹配则等待切换完成
               if (currentPageIndexRef.current !== canvasIndex) {
-                console.warn(`画布索引不匹配：期望 ${canvasIndex}，实际 ${currentPageIndexRef.current}，等待切换完成...`)
                 // 如果索引不匹配，可能是切换还未完成，等待一下再重试
                 setTimeout(() => {
                   if (currentPageIndexRef.current === canvasIndex) {
-                    console.log(`画布索引已匹配，继续应用数据`)
                     applyDataToCanvas()
                   } else {
                     console.error(`画布索引仍然不匹配：期望 ${canvasIndex}，实际 ${currentPageIndexRef.current}，跳过应用`)
@@ -1906,18 +2042,6 @@ export default function Editor() {
                 return
               }
               
-              // 调试：检查画布上的所有对象
-              const allObjects = targetCanvas.getObjects()
-              console.log(`画布 ${canvasIndex + 1} 上的对象数量: ${allObjects.length}`)
-              allObjects.forEach((obj: any, idx: number) => {
-                console.log(`  对象 ${idx}: id=${obj.id}, type=${obj.type}, text=${obj.text || 'N/A'}`)
-              })
-              
-              // 调试：检查 canvasCodeMap 中的元素
-              console.log(`canvasCodeMap 大小: ${canvasCodeMap.size}`)
-              canvasCodeMap.forEach((element, codeKey) => {
-                console.log(`  ${codeKey} -> element.id=${element.id}`)
-              })
               
               // 应用 CODE_标数据到当前画布
               // 如果没有画布分组信息，使用顺序匹配（CODE_标 1 对应第一个元素，CODE_标 2 对应第二个元素）
@@ -1930,14 +2054,12 @@ export default function Editor() {
                 const text = o.text || ''
                 const trimmedText = text.trim()
                 if (trimmedText.length <= 2) {
-                  console.log(`画布 ${canvasIndex + 1}：跳过短文本元素 (${trimmedText.length}字): "${text}" (ID: ${o.id})`)
                   return false
                 }
                 
                 // 排除表情符号（通过检查是否包含表情符号字符）
                 const emojiRegex = /[\u{1F300}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u
                 if (emojiRegex.test(text)) {
-                  console.log(`画布 ${canvasIndex + 1}：跳过表情符号元素 (ID: ${o.id})`)
                   return false
                 }
                 
@@ -1948,7 +2070,6 @@ export default function Editor() {
                 return a.left - b.left
               })
               
-              console.log(`画布 ${canvasIndex + 1} 上排序后的有效文本元素数量: ${textObjects.length}`)
               
               Object.keys(canvasData).forEach(codeKey => {
                 if (codeKey.startsWith('CODE_')) {
@@ -1962,21 +2083,13 @@ export default function Editor() {
                     
                     if (!isNaN(codeNumber) && codeNumber > 0 && codeNumber <= textObjects.length) {
                       obj = textObjects[codeNumber - 1]
-                      console.log(`  通过顺序匹配：${codeKey} -> 第 ${codeNumber} 个文本元素 (ID: ${obj.id}, 当前文本: ${obj.text || 'N/A'})`)
-                    } else {
-                      console.warn(`  CODE_标编号 ${codeNumber} 超出范围 (画布上文本元素数: ${textObjects.length})`)
                     }
                     
                     if (obj && (obj.type === 'textbox' || obj.type === 'text')) {
                       const maxLength = element.estimatedMaxChars || 200
                       obj.set('text', smartTruncate(String(codeValue), maxLength))
                       appliedCount++
-                      console.log(`  成功应用 ${codeKey} = "${codeValue}" 到元素 ${obj.id}`)
-                    } else {
-                      console.warn(`  未找到匹配的元素用于 ${codeKey} (元素ID: ${element.id}, 画布上文本元素数: ${textObjects.length})`)
                     }
-                  } else {
-                    console.warn(`  canvasCodeMap 中没有找到 ${codeKey}`)
                   }
                 }
               })
@@ -1984,7 +2097,6 @@ export default function Editor() {
               targetCanvas.renderAll()
               syncCanvasToPage(false, true)
               
-              console.log(`画布 ${canvasIndex + 1} 已应用 ${appliedCount} 个元素`)
               
               // 完成处理，resolve Promise
               resolve()
@@ -2012,7 +2124,6 @@ export default function Editor() {
               const maxRetries = 10
               const checkAndApply = () => {
                 if (currentPageIndexRef.current === canvasIndex) {
-                  console.log(`画布 ${canvasIndex + 1} 切换完成，开始应用数据`)
                   applyDataToCanvas()
                 } else if (retryCount < maxRetries) {
                   retryCount++

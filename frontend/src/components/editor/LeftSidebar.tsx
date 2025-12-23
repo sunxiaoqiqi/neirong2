@@ -23,7 +23,6 @@ import { materialService } from '@/services/materialService'
 import { aiService } from '@/services/aiService'
 import { templateService } from '@/services/templateService'
 import { fabric } from 'fabric'
-import { testUniqueCodeMatching } from './testUniqueCodeMatching'
 import { useAiApply } from './hooks/useAiApply'
 import ArticleListModal from './ArticleListModal'
 
@@ -239,7 +238,6 @@ export default function LeftSidebar({
           
           if (isEmoji) {
             // 表情符号不进行解析，直接跳过
-            console.log(`跳过表情符号元素 (ID: ${obj.id})`)
             return // 跳过这个元素
           }
         }
@@ -314,7 +312,6 @@ export default function LeftSidebar({
         }
       }
       
-      console.log('模板分析结果:', result)
       setTemplateAnalysisResult(result)
       
       // 生成AI提示词
@@ -498,13 +495,7 @@ export default function LeftSidebar({
   const validateTemplateParseFunctionality = () => {
     // 这个函数可以在开发时用来检查功能是否正确加载
     if (process.env.NODE_ENV === 'development') {
-      console.log('模板解析功能已初始化')
-      console.log('可用函数:', {
-        analyzeTemplate: typeof analyzeTemplate === 'function',
-        generateAiPrompt: typeof generateAiPrompt === 'function',
-        copyToClipboard: typeof copyToClipboard === 'function',
-        applyAiResultToTemplate: typeof applyAiResultToTemplate === 'function'
-      })
+      // 功能验证逻辑（已移除调试输出）
     }
   }
   
@@ -617,6 +608,15 @@ export default function LeftSidebar({
       loadImageGallery()
     }
   }, [imageDrawerVisible])
+
+  // 监听模板抽屉打开，自动加载所有模板
+  useEffect(() => {
+    if (templateDrawerVisible) {
+      // 重置搜索关键词，加载所有模板
+      setTemplateKeyword('')
+      loadTemplates('')
+    }
+  }, [templateDrawerVisible])
   
   // 上传图片函数 - 支持不同的上传模式
   const handleUploadImage = async (file: File, uploadToLibrary: boolean = false) => {
@@ -647,7 +647,6 @@ export default function LeftSidebar({
         }
         
         if (fileUrl) {
-          console.log('获取到的图片URL:', fileUrl)
           
           // 处理URL格式，确保使用正确的端口
           let processedUrl = fileUrl;
@@ -671,16 +670,12 @@ export default function LeftSidebar({
           try {
             // 确保onAddImage存在且为函数
             if (onAddImage && typeof onAddImage === 'function') {
-              console.log('调用onAddImage添加图片，使用URL:', processedUrl)
               onAddImage(processedUrl)
-            } else {
-              console.warn('onAddImage未定义或不是函数，无法将图片添加到画布')
             }
           } catch (error) {
             console.error('调用onAddImage时发生错误:', error)
           }
         } else {
-            console.warn('上传成功但返回数据格式不正确:', response)
             message.warning('图片上传成功但无法获取图片URL，请刷新资源库查看')
           // 仍然刷新资源库，因为图片已上传成功
           loadImageGallery()
@@ -693,11 +688,9 @@ export default function LeftSidebar({
         try {
           // 确保onAddImage存在且为函数
           if (onAddImage && typeof onAddImage === 'function') {
-            console.log('普通上传：直接添加图片到画布，使用临时URL:', tempUrl)
             onAddImage(tempUrl)
             message.success('图片上传成功')
           } else {
-            console.warn('onAddImage未定义或不是函数，无法将图片添加到画布')
             message.error('图片添加失败')
           }
         } catch (error) {

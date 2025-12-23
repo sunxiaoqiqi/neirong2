@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ColorPicker, Button, Space, message, Modal } from 'antd';
-import { EyeOutlined, CheckCircleOutlined, EyeInvisibleOutlined } from '@ant-design/icons';
+import { EyeOutlined, CheckCircleOutlined, EyeInvisibleOutlined, BorderOutlined } from '@ant-design/icons';
 import { fabric } from 'fabric';
 
 interface ColorPickerWithEyeDropperProps {
@@ -25,6 +25,24 @@ const ColorPickerWithEyeDropper: React.FC<ColorPickerWithEyeDropperProps> = ({
   const overlayRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null); // 预览元素引用
   
+  // 处理透明色选择
+  const handleTransparentClick = () => {
+    if (disabled) {
+      message.warning('当前功能已禁用');
+      return;
+    }
+    
+    // 设置透明色 - 使用 rgba(0,0,0,0) 格式，这样在 fabric.js 中能正确应用
+    const transparentColor = {
+      toHexString: () => 'rgba(0, 0, 0, 0)',
+      toHslString: () => 'rgba(0, 0, 0, 0)',
+      toRgbString: () => 'rgba(0, 0, 0, 0)',
+      toRgb: () => ({ r: 0, g: 0, b: 0, a: 0 })
+    };
+    
+    onChange(transparentColor);
+  };
+
   // 处理吸色功能
   const handleEyeDropperClick = () => {
     if (disabled || !canvas) {
@@ -403,6 +421,12 @@ const ColorPickerWithEyeDropper: React.FC<ColorPickerWithEyeDropperProps> = ({
     </div>
   );
   
+  // 检查当前颜色是否为透明色
+  const isTransparent = value === 'transparent' || 
+                       value === 'rgba(0, 0, 0, 0)' || 
+                       value === 'rgba(0,0,0,0)' ||
+                       (typeof value === 'string' && value.includes('rgba') && value.includes('0, 0, 0, 0'));
+
   return (
     <>
       <Space size={0} className="color-picker-with-eyedropper">
@@ -415,6 +439,14 @@ const ColorPickerWithEyeDropper: React.FC<ColorPickerWithEyeDropperProps> = ({
             width: showText ? '200px' : '40px',
             borderColor: isEyeDropperActive ? '#1890ff' : undefined
           }}
+        />
+        <Button
+          icon={<BorderOutlined />}
+          size="small"
+          onClick={handleTransparentClick}
+          disabled={disabled}
+          className={`px-2 ${isTransparent ? 'bg-blue-100 text-blue-600 border-blue-300' : ''}`}
+          title="透明色"
         />
         <Button
           icon={isEyeDropperActive ? <EyeInvisibleOutlined /> : <EyeOutlined />}
