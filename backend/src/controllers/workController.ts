@@ -45,7 +45,7 @@ export const getWorks = async (req: Request, res: Response) => {
       filteredWorks = works.filter((work) => {
         if (!work.tags) return false
         const workTags = JSON.parse(work.tags) as string[]
-        return tagArray.some((tag) => workTags.includes(tag))
+        return tagArray.some((tag) => workTags.includes(String(tag)))
       })
     }
 

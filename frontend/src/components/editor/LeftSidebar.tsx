@@ -608,15 +608,6 @@ export default function LeftSidebar({
       loadImageGallery()
     }
   }, [imageDrawerVisible])
-
-  // 监听模板抽屉打开，自动加载所有模板
-  useEffect(() => {
-    if (templateDrawerVisible) {
-      // 重置搜索关键词，加载所有模板
-      setTemplateKeyword('')
-      loadTemplates('')
-    }
-  }, [templateDrawerVisible])
   
   // 上传图片函数 - 支持不同的上传模式
   const handleUploadImage = async (file: File, uploadToLibrary: boolean = false) => {

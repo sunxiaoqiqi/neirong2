@@ -63,7 +63,7 @@ router.get('/', async (req, res) => {
       filteredMaterials = materials.filter((material) => {
         if (!material.tags) return false
         const materialTags = JSON.parse(material.tags) as string[]
-        return tagArray.some((tag) => materialTags.includes(tag))
+        return tagArray.some((tag) => materialTags.includes(String(tag)))
       })
     }
 

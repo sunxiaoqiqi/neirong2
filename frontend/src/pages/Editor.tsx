@@ -21,7 +21,9 @@ import ExportDialog from '@/components/editor/ExportDialog'
 import LeftSidebar from '@/components/editor/LeftSidebar'
 import RightSidebar from '@/components/editor/RightSidebar'
 import ArticlePaginationModal from '@/components/editor/ArticlePaginationModal'
-import ImageEditModal from '@/components/editor/ImageEditModal'
+import ImageCropModal from '@/components/editor/ImageCropModal'
+import MagicWandModal from '@/components/editor/MagicWandModal'
+import EraseModal from '@/components/editor/EraseModal'
 import type { Article } from '@/types/article'
 
 /* =========================
@@ -113,9 +115,12 @@ export default function Editor() {
   const [articlePaginationVisible, setArticlePaginationVisible] = useState(false)
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null)
   const [articleCanvasSize, setArticleCanvasSize] = useState<{ width: number; height: number } | null>(null)
-  const [imageEditVisible, setImageEditVisible] = useState(false)
-  const [editingImage, setEditingImage] = useState<fabric.Image | null>(null)
-  const [imageEditMode, setImageEditMode] = useState<'crop' | 'magicWand' | 'erase'>('crop')
+  const [cropModalVisible, setCropModalVisible] = useState(false)
+  const [cropTargetImage, setCropTargetImage] = useState<fabric.Image | null>(null)
+  const [magicWandModalVisible, setMagicWandModalVisible] = useState(false)
+  const [magicWandTargetImage, setMagicWandTargetImage] = useState<fabric.Image | null>(null)
+  const [eraseModalVisible, setEraseModalVisible] = useState(false)
+  const [eraseTargetImage, setEraseTargetImage] = useState<fabric.Image | null>(null)
 
   /* ---------- guard ---------- */
   const isApplyingRef = useRef(false)
@@ -152,6 +157,13 @@ export default function Editor() {
       preserveObjectStacking: true,
     })
 
+    // 设置canvas元素可接收键盘事件
+    const canvasElement = canvas.getElement()
+    if (canvasElement) {
+      canvasElement.setAttribute('tabindex', '0')
+      canvasElement.style.outline = 'none'
+    }
+
     canvasRef.current = canvas
     bindCanvasEvents(canvas)
     renderPageToCanvas(pagesRef.current[0])
@@ -164,149 +176,340 @@ export default function Editor() {
       
       // 清理画布的键盘事件监听器
       const keyHandler = (canvas as any)._deleteKeyHandler
+      const windowHandler = (canvas as any)._windowKeyHandler
+      const docHandler = (canvas as any)._documentKeyHandler
+      const canvasHandler = (canvas as any)._canvasKeyHandler
+      const positionRestoreInterval = (canvas as any)._positionRestoreInterval
+      
       if (keyHandler) {
-        window.removeEventListener('keydown', keyHandler, true)
-        document.removeEventListener('keydown', keyHandler, true)
-        const upperCanvasEl = canvas.upperCanvasEl
-        if (upperCanvasEl && (canvas as any)._deleteKeyHandlerUpper) {
-          upperCanvasEl.removeEventListener('keydown', keyHandler, true)
-        }
-        const containerEl = canvasElRef.current?.parentElement
-        if (containerEl && (canvas as any)._deleteKeyHandlerContainer) {
-          containerEl.removeEventListener('keydown', keyHandler, true)
+        const canvasElement = canvas.getElement()
+        if (canvasElement) {
+          canvasElement.removeEventListener('keydown', keyHandler, true)
         }
         delete (canvas as any)._deleteKeyHandler
-        delete (canvas as any)._deleteKeyHandlerUpper
-        delete (canvas as any)._deleteKeyHandlerWindow
-        delete (canvas as any)._deleteKeyHandlerContainer
+      }
+      if (windowHandler) {
+        window.removeEventListener('keydown', windowHandler, true)
+        delete (canvas as any)._windowKeyHandler
+      }
+      if (docHandler) {
+        document.removeEventListener('keydown', docHandler, true)
+        delete (canvas as any)._documentKeyHandler
+      }
+      if (canvasHandler) {
+        const canvasElement = canvas.getElement()
+        if (canvasElement) {
+          canvasElement.removeEventListener('keydown', canvasHandler, true)
+        }
+        delete (canvas as any)._canvasKeyHandler
+      }
+      if (positionRestoreInterval) {
+        clearInterval(positionRestoreInterval)
+        delete (canvas as any)._positionRestoreInterval
       }
     }
   }, [])
-
-  /* =========================
-     键盘删除功能（独立 useEffect）
-  ========================= */
-
-  useEffect(() => {
-    let handleKeyDown: ((e: KeyboardEvent) => void) | null = null
-    let timer: ReturnType<typeof setTimeout> | null = null
-
-    // 使用 setTimeout 确保画布已经初始化
-    timer = setTimeout(() => {
-      const canvas = canvasRef.current
-      if (!canvas) {
-        return
-      }
-
-      handleKeyDown = (e: KeyboardEvent) => {
-        // 检查是否按下了删除键或退格键
-        if (e.key === 'Delete' || e.key === 'Backspace' || e.code === 'Delete' || e.code === 'Backspace') {
-          const target = e.target as HTMLElement
-          
-          // 检查是否是在输入框中按下的键，如果是则不处理
-          if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-            return
-          }
-          
-          const canvas = canvasRef.current
-          if (!canvas) return
-          
-          // 获取当前选中的对象
-          const activeObject = canvas.getActiveObject()
-          
-          // 如果没有选中对象，不处理
-          if (!activeObject) {
-            return
-          }
-          
-          // 检查文本对象是否正在编辑
-          if (activeObject.type === 'i-text' || activeObject.type === 'text' || activeObject.type === 'textbox') {
-            const textObject = activeObject as fabric.IText
-            // 如果文本对象正在编辑（有光标），不删除，让用户正常编辑
-            if (textObject.isEditing && textObject.hiddenTextarea) {
-              return
-            }
-          }
-          
-          // 如果处于绘制模式，不处理删除
-          if (canvas.isDrawingMode) {
-            return
-          }
-          
-          // 阻止默认行为（如浏览器后退等）
-          e.preventDefault()
-          e.stopPropagation()
-          e.stopImmediatePropagation()
-          
-          try {
-            // 处理多选对象（activeSelection）
-            if (activeObject.type === 'activeSelection') {
-              const activeSelection = activeObject as fabric.ActiveSelection
-              const objects = activeSelection.getObjects()
-              
-              // 删除所有选中的对象
-              objects.forEach((obj: fabric.Object) => {
-                canvas.remove(obj)
-              })
-              
-              // 清除选择状态
-              canvas.discardActiveObject()
-              canvas.renderAll()
-              
-              // 触发变更处理
-              if (isApplyingRef.current) return
-              syncCanvasToPage(true, true)
-              setHasUnsavedChanges(true)
-            } else {
-              // 删除单个选中的对象
-              canvas.remove(activeObject)
-              
-              // 清除选择状态
-              canvas.discardActiveObject()
-              
-              // 重新渲染画布
-              canvas.renderAll()
-              
-              // 触发变更处理（会自动触发 object:removed 事件）
-              if (isApplyingRef.current) return
-              syncCanvasToPage(true, true)
-              setHasUnsavedChanges(true)
-            }
-          } catch (error) {
-            console.error('删除对象过程中出错:', error)
-          }
-        }
-      }
-
-      // 添加全局键盘事件监听（使用捕获阶段，确保优先处理）
-      window.addEventListener('keydown', handleKeyDown, true)
-      document.addEventListener('keydown', handleKeyDown, true)
-    }, 100) // 延迟100ms确保画布已初始化
-
-    return () => {
-      if (timer) clearTimeout(timer)
-      if (handleKeyDown) {
-        window.removeEventListener('keydown', handleKeyDown, true)
-        document.removeEventListener('keydown', handleKeyDown, true)
-      }
-    }
-  }, []) // 只在组件挂载时添加一次
 
   /* =========================
      Fabric 事件绑定
   ========================= */
 
   const bindCanvasEvents = (canvas: fabric.Canvas) => {
-    canvas.on('selection:created', e => setSelectedObject(e.selected?.[0] || null))
-    canvas.on('selection:updated', e => setSelectedObject(e.selected?.[0] || null))
-    canvas.on('selection:cleared', () => setSelectedObject(null))
+    // 保存对象在"选择前"的位置（用于检测 fabric.js 是否自动改变了位置）
+    const positionsBeforeSelection = new WeakMap<fabric.Object, { left: number; top: number }>()
+    let positionRestoreInterval: number | null = null
+    let isUserOperating = false // 标记用户是否在操作（拖拽、对齐等）
     
-    // 点击画布时自动聚焦，确保键盘事件能正常工作
+    // 在鼠标按下时保存所有对象的位置（在创建 ActiveSelection 之前）
+    // 这是"选择前的状态"，用于检测 fabric.js 是否自动改变了位置
     canvas.on('mouse:down', () => {
-      const upperCanvasEl = canvas.upperCanvasEl
-      if (upperCanvasEl) {
-        upperCanvasEl.focus()
+      isUserOperating = false
+      const objects = canvas.getObjects()
+      objects.forEach((obj: fabric.Object) => {
+        // 确保保存的位置是有效的（不是 undefined 或 null）
+        const left = typeof obj.left === 'number' ? obj.left : 0
+        const top = typeof obj.top === 'number' ? obj.top : 0
+        positionsBeforeSelection.set(obj, {
+          left,
+          top,
+        })
+      })
+    })
+    
+    // 监听用户拖拽
+    canvas.on('object:moving', () => {
+      isUserOperating = true
+    })
+    
+    // 监听用户操作完成（拖拽、对齐等），更新保存的位置
+    canvas.on('object:modified', (e: any) => {
+      const obj = e.target
+      if (!obj) return
+      
+      // 如果是用户操作（拖拽、对齐等），更新保存的位置
+      // 检查事件中是否有 userOperation 标记，或者 isUserOperating 标志
+      if (isUserOperating || e.userOperation) {
+        positionsBeforeSelection.set(obj, {
+          left: obj.left || 0,
+          top: obj.top || 0,
+        })
+        
+        // 如果是 ActiveSelection，更新所有对象的位置
+        const activeObject = canvas.getActiveObject()
+        if (activeObject && activeObject.type === 'activeSelection') {
+          const activeSelection = activeObject as fabric.ActiveSelection
+          const objects = activeSelection.getObjects()
+          objects.forEach((o: fabric.Object) => {
+            positionsBeforeSelection.set(o, {
+              left: o.left || 0,
+              top: o.top || 0,
+            })
+          })
+        }
       }
+    })
+    
+    // 获取对象在画布上的绝对位置（考虑 ActiveSelection 的变换）
+    const getAbsolutePosition = (obj: fabric.Object, activeSelection?: fabric.ActiveSelection): { left: number; top: number } => {
+      if (activeSelection) {
+        // 如果对象在 ActiveSelection 中，需要计算绝对位置
+        // ActiveSelection 中的对象坐标是相对于 ActiveSelection 的
+        const objLeft = obj.left || 0
+        const objTop = obj.top || 0
+        const selectionLeft = activeSelection.left || 0
+        const selectionTop = activeSelection.top || 0
+        const selectionAngle = activeSelection.angle || 0
+        const selectionScaleX = activeSelection.scaleX || 1
+        const selectionScaleY = activeSelection.scaleY || 1
+        
+        // 计算旋转后的偏移
+        const rad = fabric.util.degreesToRadians(selectionAngle)
+        const cos = Math.cos(rad)
+        const sin = Math.sin(rad)
+        
+        const rotatedX = objLeft * cos - objTop * sin
+        const rotatedY = objLeft * sin + objTop * cos
+        
+        return {
+          left: selectionLeft + rotatedX * selectionScaleX,
+          top: selectionTop + rotatedY * selectionScaleY,
+        }
+      } else {
+        // 如果不在 ActiveSelection 中，直接返回对象的位置
+        return {
+          left: typeof obj.left === 'number' ? obj.left : 0,
+          top: typeof obj.top === 'number' ? obj.top : 0,
+        }
+      }
+    }
+    
+    // 恢复对象位置的函数（只在 fabric.js 自动改变位置时调用）
+    const restoreObjectPositions = (activeSelection: fabric.ActiveSelection) => {
+      // 如果用户正在操作，不恢复位置
+      if (isUserOperating) return
+      
+      const objects = activeSelection.getObjects()
+      let hasChanges = false
+      
+      objects.forEach((obj: fabric.Object) => {
+        const posBeforeSelection = positionsBeforeSelection.get(obj)
+        
+        if (posBeforeSelection) {
+          // 获取对象当前的绝对位置
+          const currentAbsolute = getAbsolutePosition(obj, activeSelection)
+          
+          // 如果位置被改变了（fabric.js 自动改变的），恢复选择前的位置
+          if (Math.abs(currentAbsolute.left - posBeforeSelection.left) > 0.1 || 
+              Math.abs(currentAbsolute.top - posBeforeSelection.top) > 0.1) {
+            // 计算需要设置的相对位置（相对于 ActiveSelection）
+            const selectionLeft = activeSelection.left || 0
+            const selectionTop = activeSelection.top || 0
+            const selectionAngle = activeSelection.angle || 0
+            const selectionScaleX = activeSelection.scaleX || 1
+            const selectionScaleY = activeSelection.scaleY || 1
+            
+            // 计算相对位置
+            const deltaX = posBeforeSelection.left - selectionLeft
+            const deltaY = posBeforeSelection.top - selectionTop
+            
+            // 反向旋转
+            const rad = -fabric.util.degreesToRadians(selectionAngle)
+            const cos = Math.cos(rad)
+            const sin = Math.sin(rad)
+            
+            const rotatedX = (deltaX * cos - deltaY * sin) / selectionScaleX
+            const rotatedY = (deltaX * sin + deltaY * cos) / selectionScaleY
+            
+            obj.set({
+              left: rotatedX,
+              top: rotatedY,
+            })
+            obj.setCoords()
+            hasChanges = true
+          }
+        } else {
+          // 如果没有保存的位置，保存当前的绝对位置
+          const absolute = getAbsolutePosition(obj, activeSelection)
+          positionsBeforeSelection.set(obj, absolute)
+        }
+      })
+      
+      if (hasChanges) {
+        activeSelection.setCoords()
+        canvas.renderAll()
+      }
+    }
+    
+    canvas.on('selection:created', e => {
+      const activeObject = canvas.getActiveObject()
+      
+      // 如果是多选（activeSelection），需要恢复对象的原始位置
+      if (activeObject && activeObject.type === 'activeSelection') {
+        const activeSelection = activeObject as fabric.ActiveSelection
+        const objects = activeSelection.getObjects()
+        
+        // 立即恢复每个对象的位置（在 ActiveSelection 创建后立即恢复）
+        // 使用同步方式立即恢复，不等待异步操作
+        objects.forEach((obj: fabric.Object) => {
+          const posBeforeSelection = positionsBeforeSelection.get(obj)
+          if (posBeforeSelection) {
+            // 获取对象当前的绝对位置
+            const currentAbsolute = getAbsolutePosition(obj, activeSelection)
+            
+            // 如果位置被改变了，恢复选择前的位置
+            if (Math.abs(currentAbsolute.left - posBeforeSelection.left) > 0.1 || 
+                Math.abs(currentAbsolute.top - posBeforeSelection.top) > 0.1) {
+              // 计算需要设置的相对位置（相对于 ActiveSelection）
+              const selectionLeft = activeSelection.left || 0
+              const selectionTop = activeSelection.top || 0
+              const selectionAngle = activeSelection.angle || 0
+              const selectionScaleX = activeSelection.scaleX || 1
+              const selectionScaleY = activeSelection.scaleY || 1
+              
+              // 计算相对位置
+              const deltaX = posBeforeSelection.left - selectionLeft
+              const deltaY = posBeforeSelection.top - selectionTop
+              
+              // 反向旋转
+              const rad = -fabric.util.degreesToRadians(selectionAngle)
+              const cos = Math.cos(rad)
+              const sin = Math.sin(rad)
+              
+              const rotatedX = (deltaX * cos - deltaY * sin) / selectionScaleX
+              const rotatedY = (deltaX * sin + deltaY * cos) / selectionScaleY
+              
+              obj.set({
+                left: rotatedX,
+                top: rotatedY,
+              })
+              obj.setCoords()
+            }
+          } else {
+            // 如果没有保存的位置，保存当前的绝对位置
+            const absolute = getAbsolutePosition(obj, activeSelection)
+            positionsBeforeSelection.set(obj, absolute)
+          }
+        })
+        
+        // 更新 ActiveSelection 的边界框
+        activeSelection.setCoords()
+        canvas.renderAll()
+        
+        // 使用 setTimeout 再次恢复（确保在 fabric.js 完成所有操作后）
+        setTimeout(() => {
+          if (canvas.getActiveObject() === activeSelection && !isUserOperating) {
+            restoreObjectPositions(activeSelection)
+          }
+        }, 0)
+        
+        // 持续监控并恢复位置（每16ms检查一次，约60fps）
+        // 只在 fabric.js 自动改变位置时恢复，不在用户操作时恢复
+        if (positionRestoreInterval) {
+          clearInterval(positionRestoreInterval)
+        }
+        positionRestoreInterval = window.setInterval(() => {
+          if (canvas.getActiveObject() === activeSelection && !isUserOperating) {
+            restoreObjectPositions(activeSelection)
+          } else if (canvas.getActiveObject() !== activeSelection) {
+            // 如果不再是 activeSelection，清除监控
+            if (positionRestoreInterval) {
+              clearInterval(positionRestoreInterval)
+              positionRestoreInterval = null
+            }
+          }
+        }, 16)
+        
+        // 保存 interval 引用以便清理
+        ;(canvas as any)._positionRestoreInterval = positionRestoreInterval
+        
+        setSelectedObject(activeObject)
+      } else if (activeObject && activeObject.type === 'group') {
+        setSelectedObject(activeObject)
+      } else {
+        // 单选对象：fabric.js 在单选时不应该改变位置，所以不需要恢复
+        // 只需要更新保存的位置，以防下次选中时位置被改变
+        const selectedObj = e.selected?.[0] || activeObject
+        if (selectedObj && selectedObj.type !== 'activeSelection' && selectedObj.type !== 'group') {
+          // 更新保存的位置（使用当前位置）
+          positionsBeforeSelection.set(selectedObj, {
+            left: selectedObj.left || 0,
+            top: selectedObj.top || 0,
+          })
+        }
+        setSelectedObject(selectedObj || null)
+      }
+    })
+    
+    canvas.on('selection:updated', e => {
+      const activeObject = canvas.getActiveObject()
+      
+      // 如果是多选（activeSelection），需要恢复对象的原始位置
+      if (activeObject && activeObject.type === 'activeSelection') {
+        const activeSelection = activeObject as fabric.ActiveSelection
+        
+        // 立即恢复位置
+        restoreObjectPositions(activeSelection)
+        
+        // 使用 setTimeout 再次恢复
+        setTimeout(() => {
+          if (canvas.getActiveObject() === activeSelection) {
+            restoreObjectPositions(activeSelection)
+          }
+        }, 0)
+        
+        setSelectedObject(activeObject)
+      } else if (activeObject && activeObject.type === 'group') {
+        setSelectedObject(activeObject)
+      } else {
+        // 单选对象：fabric.js 在单选时不应该改变位置，所以不需要恢复
+        // 只需要更新保存的位置，以防下次选中时位置被改变
+        const selectedObj = e.selected?.[0] || activeObject
+        if (selectedObj && selectedObj.type !== 'activeSelection' && selectedObj.type !== 'group') {
+          // 更新保存的位置（使用当前位置）
+          positionsBeforeSelection.set(selectedObj, {
+            left: selectedObj.left || 0,
+            top: selectedObj.top || 0,
+          })
+        }
+        setSelectedObject(selectedObj || null)
+      }
+    })
+    
+    canvas.on('selection:cleared', () => {
+      // 清除监控
+      if (positionRestoreInterval) {
+        clearInterval(positionRestoreInterval)
+        positionRestoreInterval = null
+        delete (canvas as any)._positionRestoreInterval
+      }
+      
+      // 重置用户操作标志
+      isUserOperating = false
+      
+      // 注意：不在取消选中时恢复位置，因为用户可能已经做了对齐等操作
+      // 位置恢复只在创建 ActiveSelection 时进行，防止 fabric.js 自动改变位置
+      
+      setSelectedObject(null)
     })
 
     const onChange = () => {
@@ -319,6 +522,119 @@ export default function Editor() {
     canvas.on('object:modified', onChange)
     canvas.on('object:removed', onChange)
     canvas.on('text:changed', onChange)
+    
+    // 添加键盘删除事件处理
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement
+      
+      // 检查是否按下了删除键或退格键
+      if (e.key === 'Delete' || e.key === 'Backspace' || e.code === 'Delete' || e.code === 'Backspace') {
+        // 检查是否是在输入框、文本区域或可编辑元素中按下的键
+        const isInputElement = target.tagName === 'INPUT' || 
+            target.tagName === 'TEXTAREA' || 
+            target.isContentEditable ||
+            target.closest('.ant-input') ||
+            target.closest('.ant-input-number') ||
+            target.closest('.ant-select') ||
+            target.closest('.ant-modal') ||
+            target.closest('.ant-drawer')
+        
+        if (isInputElement) {
+          return
+        }
+        
+        // 获取当前选中的对象
+        const activeObject = canvas.getActiveObject()
+        
+        // 检查是否处于文本编辑模式（IText 对象正在编辑）
+        const isTextEditing = activeObject && 
+          (activeObject.type === 'i-text' || activeObject.type === 'textbox' || activeObject.type === 'text') &&
+          (activeObject as any).isEditing
+        
+        // 如果有选中的对象且不是处于文本编辑模式且不是绘制模式
+        if (activeObject && !isTextEditing && !canvas.isDrawingMode) {
+          // 阻止默认行为（如浏览器后退等）
+          e.preventDefault()
+          e.stopPropagation()
+          
+          try {
+            // 处理多选情况
+            if (activeObject.type === 'activeSelection') {
+              // 多选：删除所有选中的对象
+              const activeSelection = activeObject as fabric.ActiveSelection
+              const objects = activeSelection.getObjects()
+              
+              objects.forEach((obj: fabric.Object) => {
+                canvas.remove(obj)
+                // 触发对象移除事件
+                canvas.fire('object:removed', { target: obj })
+              })
+            } else {
+              // 单选：删除单个对象
+              canvas.remove(activeObject)
+              // 触发对象移除事件
+              canvas.fire('object:removed', { target: activeObject })
+            }
+            
+            // 清除选择状态
+            canvas.discardActiveObject()
+            
+            // 更新选中对象状态
+            setSelectedObject(null)
+            
+            // 强制重新计算画布偏移
+            canvas.calcOffset()
+            
+            // 重新渲染画布
+            canvas.renderAll()
+            
+            // 手动触发变更处理
+            setTimeout(() => {
+              onChange()
+            }, 10)
+          } catch (error) {
+            console.error('删除对象过程中出错:', error)
+          }
+        }
+      }
+    }
+    
+    // 使用window监听键盘事件（最可靠的方式）
+    const windowHandler = (e: KeyboardEvent) => {
+      handleKeyDown(e)
+    }
+    window.addEventListener('keydown', windowHandler, true) // 使用捕获阶段
+    
+    // 同时绑定到document（备用）
+    const documentHandler = (e: KeyboardEvent) => {
+      handleKeyDown(e)
+    }
+    document.addEventListener('keydown', documentHandler, true)
+    
+    // 在canvas元素上绑定键盘事件（优先）
+    const canvasElement = canvas.getElement()
+    if (canvasElement) {
+      // 确保canvas元素可以获得焦点
+      canvasElement.setAttribute('tabindex', '0')
+      canvasElement.style.outline = 'none'
+      
+      const canvasHandler = (e: KeyboardEvent) => {
+        handleKeyDown(e)
+      }
+      canvasElement.addEventListener('keydown', canvasHandler, true)
+      
+      // 添加点击事件，使canvas获得焦点
+      canvasElement.addEventListener('click', () => {
+        canvasElement.focus()
+      }, false)
+      
+      // 保存canvas事件处理器引用
+      ;(canvas as any)._canvasKeyHandler = canvasHandler
+    }
+    
+    // 保存事件监听器引用，以便在需要时移除
+    ;(canvas as any)._windowKeyHandler = windowHandler
+    ;(canvas as any)._documentKeyHandler = documentHandler
   }
 
   /* =========================
@@ -397,20 +713,8 @@ export default function Editor() {
     // 清理之前的键盘事件监听器，防止内存泄漏
     const prevKeyHandler = (canvas as any)._deleteKeyHandler
     if (prevKeyHandler) {
-      window.removeEventListener('keydown', prevKeyHandler, true)
-      document.removeEventListener('keydown', prevKeyHandler, true)
-      const upperCanvasEl = canvas.upperCanvasEl
-      if (upperCanvasEl && (canvas as any)._deleteKeyHandlerUpper) {
-        upperCanvasEl.removeEventListener('keydown', prevKeyHandler, true)
-      }
-      const containerEl = canvasElRef.current?.parentElement
-      if (containerEl && (canvas as any)._deleteKeyHandlerContainer) {
-        containerEl.removeEventListener('keydown', prevKeyHandler, true)
-      }
+      document.removeEventListener('keydown', prevKeyHandler, true) // 保持与添加时相同的useCapture参数
       delete (canvas as any)._deleteKeyHandler
-      delete (canvas as any)._deleteKeyHandlerUpper
-      delete (canvas as any)._deleteKeyHandlerWindow
-      delete (canvas as any)._deleteKeyHandlerContainer
     }
 
     canvas.clear()
@@ -565,6 +869,69 @@ export default function Editor() {
       console.error('添加文字时出错:', error)
       message.error(`添加文字失败: ${error.message || '未知错误'}`)
     }
+  }
+
+  /* =========================
+     图片裁剪
+  ========================= */
+
+  // 进入裁剪模式
+  const handleEnterCropMode = (target: fabric.Object) => {
+    if (target instanceof fabric.Image) {
+      setCropTargetImage(target)
+      setCropModalVisible(true)
+    } else {
+      message.warning('只能裁剪图片对象')
+    }
+  }
+
+  // 裁剪确认回调
+  const handleCropConfirm = (croppedImage: fabric.Image) => {
+    syncCanvasToPage(true, true)
+    setHasUnsavedChanges(true)
+    setSelectedObject(croppedImage)
+  }
+
+  /* =========================
+     魔法棒抠图
+  ========================= */
+
+  // 进入魔法棒模式
+  const handleEnterMagicWandMode = (target: fabric.Object) => {
+    if (target instanceof fabric.Image) {
+      setMagicWandTargetImage(target)
+      setMagicWandModalVisible(true)
+    } else {
+      message.warning('只能对图片对象使用魔法棒')
+    }
+  }
+
+  // 魔法棒确认回调
+  const handleMagicWandConfirm = (processedImage: fabric.Image) => {
+    syncCanvasToPage(true, true)
+    setHasUnsavedChanges(true)
+    setSelectedObject(processedImage)
+  }
+
+  /* =========================
+     消除区域
+  ========================= */
+
+  // 进入消除模式
+  const handleEnterEraseMode = (target: fabric.Object) => {
+    if (target instanceof fabric.Image) {
+      setEraseTargetImage(target)
+      setEraseModalVisible(true)
+    } else {
+      message.warning('只能对图片对象使用消除功能')
+    }
+  }
+
+  // 消除确认回调
+  const handleEraseConfirm = (processedImage: fabric.Image) => {
+    syncCanvasToPage(true, true)
+    setHasUnsavedChanges(true)
+    setSelectedObject(processedImage)
   }
 
   /* =========================
@@ -1188,244 +1555,14 @@ export default function Editor() {
     return { el, canvas }
   }
 
-  // 将图片 URL 转换为 base64
-  const imageUrlToBase64 = (url: string): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      // 如果已经是 base64，直接返回
-      if (url.startsWith('data:')) {
-        resolve(url)
-        return
-      }
-
-      // 处理相对路径，转换为完整 URL
-      let fullUrl = url
-      if (url.startsWith('/')) {
-        fullUrl = `${window.location.origin}${url}`
-      } else if (url.startsWith('./') || (!url.startsWith('http') && !url.startsWith('blob:'))) {
-        fullUrl = `${window.location.origin}${url.startsWith('./') ? url.substring(1) : '/' + url}`
-      }
-
-      const img = new Image()
-      // blob URL 不需要 crossOrigin
-      if (!url.startsWith('blob:')) {
-        img.crossOrigin = 'anonymous'
-      }
-      
-      const timeout = setTimeout(() => {
-        reject(new Error('图片加载超时'))
-      }, 15000) // 15秒超时
-      
-      img.onload = () => {
-        clearTimeout(timeout)
-        try {
-          const canvas = document.createElement('canvas')
-          canvas.width = img.naturalWidth
-          canvas.height = img.naturalHeight
-          const ctx = canvas.getContext('2d')
-          if (ctx) {
-            ctx.drawImage(img, 0, 0)
-            const base64 = canvas.toDataURL('image/png')
-            resolve(base64)
-          } else {
-            reject(new Error('无法创建 canvas context'))
-          }
-        } catch (error) {
-          reject(error)
-        }
-      }
-      
-      img.onerror = () => {
-        clearTimeout(timeout)
-        console.warn('图片加载失败:', fullUrl)
-        // 对于 blob URL，如果加载失败，尝试从原始画布获取
-        if (url.startsWith('blob:')) {
-          reject(new Error('blob URL 已失效'))
-        } else {
-          // 如果加载失败，返回原始 URL（可能是网络问题）
-          resolve(fullUrl)
-        }
-      }
-      
-      img.src = fullUrl
-    })
-  }
-
-  // 从画布元素获取 base64
-  const getImageBase64FromCanvas = (img: fabric.Image): Promise<string | null> => {
-    return new Promise((resolve) => {
-      try {
-        const imgElement = img.getElement()
-        if (imgElement && imgElement.tagName === 'IMG') {
-          const htmlImg = imgElement as HTMLImageElement
-          if (htmlImg.complete && htmlImg.naturalWidth > 0) {
-            // 图片已加载，直接转换为 base64
-            const canvas = document.createElement('canvas')
-            canvas.width = htmlImg.naturalWidth
-            canvas.height = htmlImg.naturalHeight
-            const ctx = canvas.getContext('2d')
-            if (ctx) {
-              ctx.drawImage(htmlImg, 0, 0)
-              const base64 = canvas.toDataURL('image/png')
-              resolve(base64)
-              return
-            }
-          }
-        }
-        resolve(null)
-      } catch (error) {
-        console.warn('从画布获取图片失败:', error)
-        resolve(null)
-      }
-    })
-  }
-
   const renderPageToTempCanvas = async (
     page: PageModel,
     canvas: fabric.Canvas
   ) => {
-    let parsed = JSON.parse(page.json)
-    
-    // ⭐ 关键修复：在 loadFromJSON 之前处理所有 blob URL，转换为 base64
-    // 首先尝试从原始画布获取图片数据（如果当前页面匹配）
-    const currentPageIndex = currentPageIndexRef.current
-    const currentPage = pagesRef.current[currentPageIndex]
-    const isCurrentPage = currentPage && currentPage.id === page.id
-    
-    if (parsed.objects && Array.isArray(parsed.objects)) {
-      const imagePromises: Promise<void>[] = []
-      
-      for (let i = 0; i < parsed.objects.length; i++) {
-        const obj = parsed.objects[i]
-        if (obj.type === 'image' && obj.src) {
-          const imgSrc = obj.src
-          
-          // 检查是否需要转换为 base64（blob URL、相对路径等）
-          const needsConversion = 
-            imgSrc.startsWith('blob:') || 
-            imgSrc.startsWith('/') || 
-            (!imgSrc.startsWith('http') && !imgSrc.startsWith('data:'))
-          
-          if (needsConversion) {
-            const promise = (async () => {
-              try {
-                let base64Url: string | null = null
-                
-                // 如果是当前页面且是 blob URL，尝试从原始画布获取
-                if (isCurrentPage && imgSrc.startsWith('blob:') && canvasRef.current) {
-                  const objects = canvasRef.current.getObjects()
-                  const originalImg = objects.find((o: any) => {
-                    if (o.type === 'image') {
-                      const originalSrc = o.getElement()?.src || (o as any).src
-                      return originalSrc === imgSrc || 
-                             (Math.abs((o.left || 0) - (obj.left || 0)) < 1 && 
-                              Math.abs((o.top || 0) - (obj.top || 0)) < 1)
-                    }
-                    return false
-                  }) as fabric.Image | undefined
-                  
-                  if (originalImg) {
-                    base64Url = await getImageBase64FromCanvas(originalImg)
-                  }
-                }
-                
-                // 如果从画布获取失败，尝试从 URL 加载
-                if (!base64Url) {
-                  base64Url = await imageUrlToBase64(imgSrc)
-                }
-                
-                if (base64Url) {
-                  // 更新 JSON 中的图片 URL
-                  parsed.objects[i].src = base64Url
-                }
-              } catch (error) {
-                console.warn('图片转换失败:', imgSrc, error)
-                // 即使失败也继续，避免阻塞导出
-              }
-            })()
-            imagePromises.push(promise)
-          }
-        }
-      }
-      
-      // 等待所有图片转换完成
-      if (imagePromises.length > 0) {
-        await Promise.all(imagePromises)
-      }
-    }
-    
+    const parsed = JSON.parse(page.json)
     return new Promise<void>(resolve => {
-      canvas.loadFromJSON(parsed, async () => {
-        // 等待所有图片元素加载完成
-        const objects = canvas.getObjects()
-        const imagePromises: Promise<void>[] = []
-        
-        for (const obj of objects) {
-          if (obj.type === 'image') {
-            const img = obj as fabric.Image
-            const imgElement = img.getElement()
-            
-            if (imgElement) {
-              // 设置 crossOrigin 以支持跨域图片
-              if (imgElement.tagName === 'IMG' && !imgElement.crossOrigin) {
-                imgElement.crossOrigin = 'anonymous'
-              }
-              
-              // 等待图片加载完成
-              const promise = new Promise<void>((imgResolve) => {
-                if (imgElement.complete && imgElement.naturalWidth > 0 && imgElement.naturalHeight > 0) {
-                  // 图片已经加载完成
-                  imgResolve()
-                } else {
-                  const timeout = setTimeout(() => {
-                    console.warn('图片加载超时')
-                    imgResolve()
-                  }, 10000)
-                  
-                  const onLoad = () => {
-                    clearTimeout(timeout)
-                    imgElement.removeEventListener('load', onLoad)
-                    imgElement.removeEventListener('error', onError)
-                    imgResolve()
-                  }
-                  
-                  const onError = () => {
-                    clearTimeout(timeout)
-                    imgElement.removeEventListener('load', onLoad)
-                    imgElement.removeEventListener('error', onError)
-                    console.warn('图片加载失败:', imgElement.src)
-                    imgResolve()
-                  }
-                  
-                  imgElement.addEventListener('load', onLoad)
-                  imgElement.addEventListener('error', onError)
-                  
-                  // 如果图片还没有开始加载，触发加载
-                  if (!imgElement.complete) {
-                    const currentSrc = imgElement.src
-                    imgElement.src = ''
-                    imgElement.src = currentSrc
-                  }
-                }
-              })
-              imagePromises.push(promise)
-            }
-          }
-        }
-        
-        // 等待所有图片加载完成
-        if (imagePromises.length > 0) {
-          await Promise.all(imagePromises)
-        }
-        
-        // 添加短暂延迟，确保图片完全渲染到画布
-        await new Promise(r => setTimeout(r, 300))
-        
-        // 重新渲染以确保图片正确显示
+      canvas.loadFromJSON(parsed, () => {
         canvas.renderAll()
-        
-        // 再次等待一小段时间，确保渲染完成
-        await new Promise(r => setTimeout(r, 200))
-        
         resolve()
       })
     })
@@ -2153,21 +2290,23 @@ export default function Editor() {
               transition: 'transform 0.2s ease'
             }}
           >
-            <canvas ref={canvasElRef} />
+            <canvas 
+              ref={canvasElRef} 
+              tabIndex={0}
+              style={{ outline: 'none' }}
+            />
           </div>
         </div>
         <div className="w-[390px] border-l bg-white overflow-y-auto overflow-x-hidden flex-shrink-0">
           <div className="p-4 w-full max-w-full box-border">
-            <RightSidebar
-              canvas={canvasRef.current}
+            <RightSidebar 
+              canvas={canvasRef.current} 
               selectedObject={selectedObject}
               zoom={zoom}
               onZoomChange={setZoom}
-              onOpenImageEdit={(image, mode) => {
-                setEditingImage(image)
-                setImageEditMode(mode)
-                setImageEditVisible(true)
-              }}
+              onEnterCropMode={handleEnterCropMode}
+              onEnterMagicWandMode={handleEnterMagicWandMode}
+              onEnterEraseMode={handleEnterEraseMode}
             />
           </div>
         </div>
@@ -2253,51 +2392,6 @@ export default function Editor() {
         canvasHeight={articleCanvasSize?.height || CANVAS_HEIGHT}
       />
 
-      {/* 图片处理弹框 */}
-      <ImageEditModal
-        visible={imageEditVisible}
-        imageObject={editingImage}
-        canvas={canvasRef.current}
-        mode={imageEditMode}
-        onClose={() => {
-          setImageEditVisible(false)
-          setEditingImage(null)
-        }}
-        onApply={(processedImageData) => {
-          if (!editingImage || !canvasRef.current) return
-
-          // 使用处理后的图片数据更新图片对象
-          fabric.Image.fromURL(processedImageData, (newImg: fabric.Image) => {
-            // 保持原有的位置、尺寸和变换
-            const currentLeft = editingImage.left
-            const currentTop = editingImage.top
-            const currentScaleX = editingImage.scaleX
-            const currentScaleY = editingImage.scaleY
-            const currentAngle = editingImage.angle
-            const currentOpacity = editingImage.opacity
-
-            // 替换图片元素
-            editingImage.setElement(newImg.getElement())
-            editingImage.set({
-              left: currentLeft,
-              top: currentTop,
-              scaleX: currentScaleX,
-              scaleY: currentScaleY,
-              angle: currentAngle,
-              opacity: currentOpacity,
-            })
-
-            canvasRef.current!.renderAll()
-            
-            // 触发变更事件
-            canvasRef.current!.fire('object:modified', { target: editingImage })
-            
-            setImageEditVisible(false)
-            setEditingImage(null)
-          }, { crossOrigin: 'anonymous' })
-        }}
-      />
-
       {/* 保存命名 */}
       <Modal
         open={saveModalVisible}
@@ -2344,6 +2438,43 @@ export default function Editor() {
           </div>
         </div>
       </Modal>
+
+      {/* 图片裁剪弹框 */}
+      <ImageCropModal
+        visible={cropModalVisible}
+        imageObject={cropTargetImage}
+        canvas={canvasRef.current}
+        onCancel={() => {
+          setCropModalVisible(false)
+          setCropTargetImage(null)
+        }}
+        onConfirm={handleCropConfirm}
+      />
+
+      {/* 魔法棒抠图弹框 */}
+      <MagicWandModal
+        visible={magicWandModalVisible}
+        imageObject={magicWandTargetImage}
+        canvas={canvasRef.current}
+        onCancel={() => {
+          setMagicWandModalVisible(false)
+          setMagicWandTargetImage(null)
+        }}
+        onConfirm={handleMagicWandConfirm}
+      />
+
+      {/* 消除区域弹框 */}
+      <EraseModal
+        visible={eraseModalVisible}
+        imageObject={eraseTargetImage}
+        canvas={canvasRef.current}
+        onCancel={() => {
+          setEraseModalVisible(false)
+          setEraseTargetImage(null)
+        }}
+        onConfirm={handleEraseConfirm}
+      />
     </div>
   )
 }
+

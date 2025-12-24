@@ -24,7 +24,7 @@ router.get('/', async (req, res) => {
       filteredTemplates = templates.filter((template) => {
         if (!template.tags) return false
         const templateTags = JSON.parse(template.tags) as string[]
-        return tagArray.some((tag) => templateTags.includes(tag))
+        return tagArray.some((tag) => templateTags.includes(String(tag)))
       })
     }
 

@@ -39,6 +39,7 @@ const { Search } = Input
 const { Option } = Select
 
 export default function Home() {
+  console.log('Home 组件函数执行')
   const navigate = useNavigate()
   const [works, setWorks] = useState<Work[]>([])
   const [loading, setLoading] = useState(false)
@@ -70,6 +71,7 @@ export default function Home() {
   const [tagWorkId, setTagWorkId] = useState<number | null>(null)
 
   useEffect(() => {
+    console.log('Home 组件挂载，开始加载数据...')
     loadWorks()
     loadAIStats()
     loadFolders()
@@ -79,6 +81,7 @@ export default function Home() {
   const loadWorks = async () => {
     setLoading(true)
     try {
+      console.log('开始加载作品列表...')
       const response = await workService.getWorks({
         page: currentPage,
         pageSize,
@@ -86,11 +89,16 @@ export default function Home() {
         tags: selectedTags,
         keyword: keyword || undefined,
       })
+      console.log('作品列表加载成功:', response)
       setWorks(response.data || [])
       setTotal(response.total || 0)
-    } catch (error) {
+    } catch (error: any) {
       console.error('加载作品失败:', error)
-      message.error('加载作品失败')
+      console.error('错误详情:', error.message, error.response)
+      message.error(`加载作品失败: ${error.message || '请检查后端服务是否启动'}`)
+      // 即使失败也设置空数组，确保页面能显示
+      setWorks([])
+      setTotal(0)
     } finally {
       setLoading(false)
     }
@@ -99,10 +107,14 @@ export default function Home() {
   const loadAIStats = async () => {
     setAiStatsLoading(true)
     try {
+      console.log('开始加载AI统计...')
       const response = await aiService.getStats()
+      console.log('AI统计加载成功:', response)
       setAiStats(response.data)
-    } catch (error) {
+    } catch (error: any) {
       console.error('加载AI统计失败:', error)
+      console.error('错误详情:', error.message, error.response)
+      // AI统计失败不影响主页面显示
     } finally {
       setAiStatsLoading(false)
     }
@@ -110,19 +122,27 @@ export default function Home() {
 
   const loadFolders = async () => {
     try {
+      console.log('开始加载文件夹...')
       const response = await folderService.getFolders('work')
+      console.log('文件夹加载成功:', response)
       setFolders(response || [])
-    } catch (error) {
+    } catch (error: any) {
       console.error('加载文件夹失败:', error)
+      console.error('错误详情:', error.message, error.response)
+      setFolders([])
     }
   }
 
   const loadTags = async () => {
     try {
+      console.log('开始加载标签...')
       const response = await tagService.getTags()
+      console.log('标签加载成功:', response)
       setTags(response || [])
-    } catch (error) {
+    } catch (error: any) {
       console.error('加载标签失败:', error)
+      console.error('错误详情:', error.message, error.response)
+      setTags([])
     }
   }
 
@@ -250,8 +270,20 @@ export default function Home() {
     })
   }
 
+  console.log('Home 组件渲染，当前状态:', {
+    works: works.length,
+    loading,
+    folders: folders.length,
+    tags: tags.length,
+    aiStats: aiStats !== null,
+  })
+
   return (
-    <div className="min-h-screen bg-background-gray">
+    <div className="min-h-screen bg-background-gray" style={{ minHeight: '100vh', backgroundColor: '#f5f5f5', padding: '20px' }}>
+      {/* 调试信息 */}
+      <div style={{ padding: '10px', backgroundColor: '#fff3cd', marginBottom: '20px', borderRadius: '4px', border: '1px solid #ffc107' }}>
+        <p style={{ margin: 0, fontSize: '12px' }}>调试: Home 组件已渲染 | 作品数: {works.length} | 加载中: {loading ? '是' : '否'}</p>
+      </div>
       <div className="max-w-7xl mx-auto px-10 py-8">
         {/* 页面标题 */}
         <div className="flex justify-between items-center mb-8">

@@ -12,6 +12,12 @@ import {
   FormatPainterOutlined,
   PlusOutlined,
   MinusOutlined,
+  AlignLeftOutlined,
+  AlignRightOutlined,
+  AlignCenterOutlined,
+  VerticalAlignMiddleOutlined,
+  BorderOuterOutlined,
+  UngroupOutlined,
 } from '@ant-design/icons'
 import { fabric } from 'fabric'
 import ColorPickerWithEyeDropper from './ColorPickerWithEyeDropper'
@@ -19,15 +25,17 @@ import ColorPickerWithEyeDropper from './ColorPickerWithEyeDropper'
 interface RightSidebarProps {
   canvas: fabric.Canvas | null
   selectedObject: fabric.Object | null
-  onOpenImageEdit?: (target: fabric.Image) => void
+  onEnterCropMode?: (target: fabric.Object) => void
+  onEnterMagicWandMode?: (target: fabric.Object) => void
+  onEnterEraseMode?: (target: fabric.Object) => void
   zoom?: number
   onZoomChange?: (zoom: number) => void
 }
 
-export default function RightSidebar({ canvas, selectedObject, onOpenImageEdit, zoom = 1, onZoomChange }: RightSidebarProps) {
+export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, onEnterMagicWandMode, onEnterEraseMode, zoom = 1, onZoomChange }: RightSidebarProps) {
   // 所有Hooks必须在组件顶层调用
   // 面板状态
-  const [activePanel, setActivePanel] = useState<'canvas' | 'text' | 'image' | 'shape' | null>(null);
+  const [activePanel, setActivePanel] = useState<'canvas' | 'text' | 'image' | 'shape' | 'group' | null>(null);
   
   // 新增的文字属性状态管理钩子
   const [lineHeight, setLineHeight] = useState<number>(1.2);
@@ -83,6 +91,14 @@ export default function RightSidebar({ canvas, selectedObject, onOpenImageEdit, 
   useEffect(() => {
     if (!selectedObject) {
       setActivePanel('canvas')
+      return
+    }
+
+    // 检查是否为多选（activeSelection 或 group）
+    const isMultiSelect = selectedObject.type === 'activeSelection' || selectedObject.type === 'group'
+    
+    if (isMultiSelect) {
+      setActivePanel('group')
       return
     }
 
@@ -159,6 +175,406 @@ export default function RightSidebar({ canvas, selectedObject, onOpenImageEdit, 
 
   if (!canvas) return null
 
+  // 组编辑面板（多选）
+  if (activePanel === 'group' && selectedObject && (selectedObject.type === 'activeSelection' || selectedObject.type === 'group')) {
+    const groupObject = selectedObject as fabric.ActiveSelection | fabric.Group
+    const objects = groupObject.type === 'activeSelection' 
+      ? (groupObject as fabric.ActiveSelection).getObjects()
+      : (groupObject as fabric.Group).getObjects()
+    
+    // 图层顺序调整
+    const handleLayerOrder = (action: 'bringForward' | 'sendBackwards' | 'bringToFront' | 'sendToBack') => {
+      if (!canvas) return
+      
+      objects.forEach((obj: fabric.Object) => {
+        switch (action) {
+          case 'bringForward':
+            canvas.bringForward(obj)
+            break
+          case 'sendBackwards':
+            canvas.sendBackwards(obj)
+            break
+          case 'bringToFront':
+            canvas.bringToFront(obj)
+            break
+          case 'sendToBack':
+            canvas.sendToBack(obj)
+            break
+        }
+      })
+      canvas.renderAll()
+    }
+    
+    // 对齐功能
+    const handleAlign = (alignType: 'left' | 'right' | 'center' | 'top' | 'bottom' | 'middle' | 'distributeH' | 'distributeV') => {
+      if (objects.length < 2) return
+      
+      let minX = Infinity, maxX = -Infinity
+      let minY = Infinity, maxY = -Infinity
+      let sumX = 0, sumY = 0
+      
+      objects.forEach((obj: fabric.Object) => {
+        const left = obj.left || 0
+        const top = obj.top || 0
+        const width = (obj.width || 0) * (obj.scaleX || 1)
+        const height = (obj.height || 0) * (obj.scaleY || 1)
+        
+        minX = Math.min(minX, left)
+        maxX = Math.max(maxX, left + width)
+        minY = Math.min(minY, top)
+        maxY = Math.max(maxY, top + height)
+        sumX += left + width / 2
+        sumY += top + height / 2
+      })
+      
+      const centerX = sumX / objects.length
+      const centerY = sumY / objects.length
+      
+      objects.forEach((obj: fabric.Object) => {
+        const width = (obj.width || 0) * (obj.scaleX || 1)
+        const height = (obj.height || 0) * (obj.scaleY || 1)
+        
+        switch (alignType) {
+          case 'left':
+            obj.set({ left: minX })
+            break
+          case 'right':
+            obj.set({ left: maxX - width })
+            break
+          case 'center':
+            obj.set({ left: centerX - width / 2 })
+            break
+          case 'top':
+            obj.set({ top: minY })
+            break
+          case 'bottom':
+            obj.set({ top: maxY - height })
+            break
+          case 'middle':
+            obj.set({ top: centerY - height / 2 })
+            break
+          case 'distributeH':
+            // 水平等距分布
+            if (objects.length > 2) {
+              const sorted = [...objects].sort((a, b) => (a.left || 0) - (b.left || 0))
+              const firstLeft = sorted[0].left || 0
+              const lastLeft = sorted[sorted.length - 1].left || 0
+              const totalWidth = lastLeft - firstLeft
+              const spacing = totalWidth / (sorted.length - 1)
+              sorted.forEach((obj, index) => {
+                if (index > 0 && index < sorted.length - 1) {
+                  obj.set({ left: firstLeft + spacing * index })
+                }
+              })
+            }
+            break
+          case 'distributeV':
+            // 垂直等距分布
+            if (objects.length > 2) {
+              const sorted = [...objects].sort((a, b) => (a.top || 0) - (b.top || 0))
+              const firstTop = sorted[0].top || 0
+              const lastTop = sorted[sorted.length - 1].top || 0
+              const totalHeight = lastTop - firstTop
+              const spacing = totalHeight / (sorted.length - 1)
+              sorted.forEach((obj, index) => {
+                if (index > 0 && index < sorted.length - 1) {
+                  obj.set({ top: firstTop + spacing * index })
+                }
+              })
+            }
+            break
+        }
+        obj.setCoords()
+      })
+      
+      // 标记这是用户操作，触发 object:modified 事件以更新保存的位置
+      objects.forEach((obj: fabric.Object) => {
+        canvas.fire('object:modified', { target: obj, userOperation: true })
+      })
+      
+      canvas.renderAll()
+    }
+    
+    // 组合功能
+    const handleGroup = () => {
+      if (!canvas || objects.length < 2) return
+      
+      try {
+        // 如果当前已经是 activeSelection，直接使用 toGroup 方法
+        if (groupObject.type === 'activeSelection') {
+          const activeSelection = groupObject as fabric.ActiveSelection
+          // 使用 toGroup 方法，它会自动处理坐标转换
+          activeSelection.toGroup()
+          
+          // 获取新创建的组合
+          const newGroup = canvas.getActiveObject() as fabric.Group
+          if (newGroup && newGroup.type === 'group') {
+            newGroup.setCoords()
+            canvas.renderAll()
+            return
+          }
+        }
+        
+        // 如果不是 activeSelection 或 toGroup 失败，手动创建组合
+        // 计算所有对象的边界框
+        let minX = Infinity, minY = Infinity
+        
+        objects.forEach((obj: fabric.Object) => {
+          const left = obj.left || 0
+          const top = obj.top || 0
+          minX = Math.min(minX, left)
+          minY = Math.min(minY, top)
+        })
+        
+        // 创建组合，fabric.Group 会自动处理坐标转换
+        // 对象的坐标会自动转换为相对于组合的坐标
+        const group = new fabric.Group([...objects], {
+          left: minX,
+          top: minY,
+        })
+        
+        // 移除原对象（已经在 Group 构造函数中处理了）
+        // 添加组合到画布
+        canvas.add(group)
+        
+        // 设置组合为选中状态
+        canvas.setActiveObject(group)
+        
+        // 确保组合可见
+        group.setCoords()
+        canvas.renderAll()
+      } catch (error) {
+        console.error('组合失败:', error)
+        message.error('组合失败，请重试')
+      }
+    }
+    
+    // 取消组合功能
+    const handleUngroup = () => {
+      if (!canvas || groupObject.type !== 'group') return
+      
+      const group = groupObject as fabric.Group
+      const groupObjects = group.getObjects()
+      
+      // 获取组合的变换信息
+      const groupLeft = group.left || 0
+      const groupTop = group.top || 0
+      const groupAngle = group.angle || 0
+      const groupScaleX = group.scaleX || 1
+      const groupScaleY = group.scaleY || 1
+      
+      // 保存每个对象在画布上的绝对位置
+      // 使用 fabric.js 的坐标转换方法
+      const objectAbsolutePositions: Array<{ obj: fabric.Object; left: number; top: number; angle: number; scaleX: number; scaleY: number }> = []
+      
+      groupObjects.forEach((obj: fabric.Object) => {
+        // 获取对象在组合内的相对位置（相对于组合的左上角）
+        const relativeLeft = obj.left || 0
+        const relativeTop = obj.top || 0
+        
+        // 使用 fabric.js 的变换矩阵计算绝对位置
+        // 组合的变换矩阵
+        const radians = (groupAngle * Math.PI) / 180
+        const cos = Math.cos(radians)
+        const sin = Math.sin(radians)
+        
+        // 应用缩放
+        const scaledX = relativeLeft * groupScaleX
+        const scaledY = relativeTop * groupScaleY
+        
+        // 应用旋转（绕组合左上角旋转）
+        const rotatedX = scaledX * cos - scaledY * sin
+        const rotatedY = scaledX * sin + scaledY * cos
+        
+        // 绝对位置 = 组合位置 + 旋转后的相对位置
+        const absoluteLeft = groupLeft + rotatedX
+        const absoluteTop = groupTop + rotatedY
+        
+        // 保存绝对位置和变换信息
+        objectAbsolutePositions.push({
+          obj,
+          left: absoluteLeft,
+          top: absoluteTop,
+          angle: (obj.angle || 0) + groupAngle,
+          scaleX: (obj.scaleX || 1) * groupScaleX,
+          scaleY: (obj.scaleY || 1) * groupScaleY,
+        })
+      })
+      
+      // 移除组合
+      canvas.remove(group)
+      
+      // 恢复每个对象到画布上的绝对位置
+      objectAbsolutePositions.forEach(({ obj, left, top, angle, scaleX, scaleY }) => {
+        obj.set({
+          left,
+          top,
+          angle,
+          scaleX,
+          scaleY,
+        })
+        obj.setCoords()
+        canvas.add(obj)
+      })
+      
+      canvas.discardActiveObject()
+      canvas.renderAll()
+    }
+    
+    return (
+      <div className="space-y-4 w-full overflow-x-hidden">
+        <div className="font-semibold text-text-primary">组编辑 ({objects.length}个元素)</div>
+        
+        {/* 图层顺序 */}
+        <div className="space-y-2">
+          <div className="text-sm text-text-secondary">图层顺序</div>
+          <Space wrap>
+            <Button
+              size="small"
+              icon={<VerticalAlignTopOutlined />}
+              onClick={() => handleLayerOrder('bringToFront')}
+              title="置顶"
+            >
+              置顶
+            </Button>
+            <Button
+              size="small"
+              icon={<ArrowUpOutlined />}
+              onClick={() => handleLayerOrder('bringForward')}
+              title="上移一层"
+            >
+              上移
+            </Button>
+            <Button
+              size="small"
+              icon={<ArrowDownOutlined />}
+              onClick={() => handleLayerOrder('sendBackwards')}
+              title="下移一层"
+            >
+              下移
+            </Button>
+            <Button
+              size="small"
+              icon={<VerticalAlignBottomOutlined />}
+              onClick={() => handleLayerOrder('sendToBack')}
+              title="置底"
+            >
+              置底
+            </Button>
+          </Space>
+        </div>
+        
+        <Divider />
+        
+        {/* 对齐方式 */}
+        <div className="space-y-2">
+          <div className="text-sm text-text-secondary">对齐方式</div>
+          <div className="space-y-2">
+            <Space wrap>
+              <Button
+                size="small"
+                icon={<AlignLeftOutlined />}
+                onClick={() => handleAlign('left')}
+                title="左对齐"
+              >
+                左对齐
+              </Button>
+              <Button
+                size="small"
+                icon={<AlignCenterOutlined />}
+                onClick={() => handleAlign('center')}
+                title="水平居中"
+              >
+                水平居中
+              </Button>
+              <Button
+                size="small"
+                icon={<AlignRightOutlined />}
+                onClick={() => handleAlign('right')}
+                title="右对齐"
+              >
+                右对齐
+              </Button>
+            </Space>
+            <Space wrap>
+              <Button
+                size="small"
+                icon={<VerticalAlignTopOutlined />}
+                onClick={() => handleAlign('top')}
+                title="顶部对齐"
+              >
+                顶部对齐
+              </Button>
+              <Button
+                size="small"
+                icon={<VerticalAlignMiddleOutlined />}
+                onClick={() => handleAlign('middle')}
+                title="垂直居中"
+              >
+                垂直居中
+              </Button>
+              <Button
+                size="small"
+                icon={<VerticalAlignBottomOutlined />}
+                onClick={() => handleAlign('bottom')}
+                title="底部对齐"
+              >
+                底部对齐
+              </Button>
+            </Space>
+            <Space wrap>
+              <Button
+                size="small"
+                onClick={() => handleAlign('distributeH')}
+                title="水平等距分布"
+                disabled={objects.length < 3}
+              >
+                水平等距
+              </Button>
+              <Button
+                size="small"
+                onClick={() => handleAlign('distributeV')}
+                title="垂直等距分布"
+                disabled={objects.length < 3}
+              >
+                垂直等距
+              </Button>
+            </Space>
+          </div>
+        </div>
+        
+        <Divider />
+        
+        {/* 组合/取消组合 */}
+        <div className="space-y-2">
+          <div className="text-sm text-text-secondary">组合操作</div>
+          <Space wrap>
+            {groupObject.type === 'group' ? (
+              <Button
+                size="small"
+                icon={<UngroupOutlined />}
+                onClick={handleUngroup}
+                title="取消组合"
+              >
+                取消组合
+              </Button>
+            ) : (
+              <Button
+                size="small"
+                icon={<BorderOuterOutlined />}
+                onClick={handleGroup}
+                title="组合"
+                disabled={objects.length < 2}
+              >
+                组合
+              </Button>
+            )}
+          </Space>
+        </div>
+      </div>
+    )
+  }
+
   // 画板编辑面板
   if (activePanel === 'canvas' || !selectedObject) {
     return (
@@ -222,53 +638,109 @@ export default function RightSidebar({ canvas, selectedObject, onOpenImageEdit, 
           <Button 
             block 
             onClick={() => {
+              // 使用 state 管理输入值
+              let canvasWidth = canvas.width || 1080
+              let canvasHeight = canvas.height || 1440
+              
               // 显示尺寸调整模态框
               Modal.confirm({
                 title: '调整画板尺寸',
+                width: 400,
                 content: (
-                  <div className="space-y-2">
-                    <div className="flex items-center mb-2">
-                      <span style={{ width: 40 }} className="text-sm text-text-secondary">宽</span>
+                  <div className="space-y-3 mt-4">
+                    <div className="flex items-center gap-2">
+                      <span style={{ width: 50 }} className="text-sm text-text-secondary">宽度</span>
                       <InputNumber 
-                        id="canvas-width" 
+                        id="canvas-width-input" 
                         placeholder="输入宽度" 
                         min={100} 
-                        max={2000} 
-                        defaultValue={canvas.width}
+                        max={5000} 
+                        defaultValue={canvasWidth}
                         style={{ flex: 1 }}
-                        formatter={(value) => `${value}px`}
+                        formatter={(value) => value ? `${value}px` : ''}
+                        parser={(value) => value ? parseInt(value.replace('px', '')) || 0 : 0}
+                        onChange={(value) => {
+                          if (value !== null && value !== undefined) {
+                            canvasWidth = value
+                          }
+                        }}
+                        onPressEnter={(e: any) => {
+                          const value = parseInt(e.target.value) || 0
+                          if (value >= 100 && value <= 5000) {
+                            canvasWidth = value
+                          }
+                        }}
                       />
                     </div>
-                    <div className="flex items-center">
-                      <span style={{ width: 40 }} className="text-sm text-text-secondary">高</span>
+                    <div className="flex items-center gap-2">
+                      <span style={{ width: 50 }} className="text-sm text-text-secondary">高度</span>
                       <InputNumber 
-                        id="canvas-height" 
+                        id="canvas-height-input" 
                         placeholder="输入高度" 
                         min={100} 
-                        max={2000} 
-                        defaultValue={canvas.height}
+                        max={5000} 
+                        defaultValue={canvasHeight}
                         style={{ flex: 1 }}
-                        formatter={(value) => `${value}px`}
+                        formatter={(value) => value ? `${value}px` : ''}
+                        parser={(value) => value ? parseInt(value.replace('px', '')) || 0 : 0}
+                        onChange={(value) => {
+                          if (value !== null && value !== undefined) {
+                            canvasHeight = value
+                          }
+                        }}
+                        onPressEnter={(e: any) => {
+                          const value = parseInt(e.target.value) || 0
+                          if (value >= 100 && value <= 5000) {
+                            canvasHeight = value
+                          }
+                        }}
                       />
                     </div>
                   </div>
                 ),
                 onOk: () => {
-                  // 获取输入的尺寸
-                  const widthInput = document.getElementById('canvas-width') as any;
-                  const heightInput = document.getElementById('canvas-height') as any;
-                  const newWidth = widthInput?.value || canvas.width;
-                  const newHeight = heightInput?.value || canvas.height;
+                  // 获取输入的尺寸（从 DOM 元素获取最新值）
+                  const widthInput = document.getElementById('canvas-width-input') as HTMLInputElement
+                  const heightInput = document.getElementById('canvas-height-input') as HTMLInputElement
+                  
+                  let newWidth = canvasWidth
+                  let newHeight = canvasHeight
+                  
+                  // 尝试从输入框获取值
+                  if (widthInput) {
+                    const widthValue = widthInput.value
+                    if (widthValue) {
+                      const parsed = parseInt(widthValue.replace('px', ''))
+                      if (!isNaN(parsed) && parsed >= 100 && parsed <= 5000) {
+                        newWidth = parsed
+                      }
+                    }
+                  }
+                  
+                  if (heightInput) {
+                    const heightValue = heightInput.value
+                    if (heightValue) {
+                      const parsed = parseInt(heightValue.replace('px', ''))
+                      if (!isNaN(parsed) && parsed >= 100 && parsed <= 5000) {
+                        newHeight = parsed
+                      }
+                    }
+                  }
+                  
+                  // 验证尺寸
+                  if (newWidth < 100 || newWidth > 5000 || newHeight < 100 || newHeight > 5000) {
+                    message.error('尺寸必须在 100-5000px 范围内')
+                    return false
+                  }
                   
                   // 更新画布尺寸
-                  canvas.setWidth(newWidth);
-                  canvas.setHeight(newHeight);
-                  canvas.renderAll();
-                  
-                  message.success('画板尺寸已调整');
+                  canvas.setWidth(newWidth)
+                  canvas.setHeight(newHeight)
+                  canvas.renderAll()
+                  message.success(`画板尺寸已调整为 ${newWidth} × ${newHeight}px`)
                 },
                 onCancel: () => {},
-              });
+              })
             }}
           >
             尺寸调整
@@ -522,10 +994,8 @@ export default function RightSidebar({ canvas, selectedObject, onOpenImageEdit, 
                 setFontSize(newSize)
                 updateText({ fontSize: newSize })
               }}
-              controls={true}
-              placeholder="输入字号"
+              formatter={(value) => `${value}px`}
             />
-            <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
           </Space.Compact>
         </div>
 
@@ -562,10 +1032,8 @@ export default function RightSidebar({ canvas, selectedObject, onOpenImageEdit, 
                 setLetterSpacing(newLetterSpacing)
                 updateText({ charSpacing: newLetterSpacing })
               }}
-              controls={true}
-              placeholder="输入字间距"
+              formatter={(value) => `${value}px`}
             />
-            <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
           </Space.Compact>
         </div>
 
@@ -702,11 +1170,8 @@ export default function RightSidebar({ canvas, selectedObject, onOpenImageEdit, 
                 onChange={(value) => {
                   updateText({ width: value || 0 })
                 }}
-                controls={true}
-                placeholder="宽度"
-                style={{ width: 120 }}
+                formatter={(value) => `${value}px`}
               />
-              <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
             </Space.Compact>
             <Space.Compact>
                 <span style={{ width: 40, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">高</span>
@@ -715,11 +1180,8 @@ export default function RightSidebar({ canvas, selectedObject, onOpenImageEdit, 
                   onChange={(value) => {
                     updateText({ height: value || 0 })
                   }}
-                  controls={true}
-                  placeholder="高度"
-                  style={{ width: 120 }}
+                  formatter={(value) => `${value}px`}
                 />
-                <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
               </Space.Compact>
           </Space>
         </div>
@@ -737,11 +1199,8 @@ export default function RightSidebar({ canvas, selectedObject, onOpenImageEdit, 
                   onChange={(value) => {
                     updateText({ left: value || 0 })
                   }}
-                  controls={true}
-                  placeholder="X坐标"
-                  style={{ width: 120 }}
+                  formatter={(value) => `${value}px`}
                 />
-                <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
               </Space.Compact>
             <Space.Compact>
                 <span style={{ width: 40, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">Y</span>
@@ -750,11 +1209,8 @@ export default function RightSidebar({ canvas, selectedObject, onOpenImageEdit, 
                   onChange={(value) => {
                     updateText({ top: value || 0 })
                   }}
-                  controls={true}
-                  placeholder="Y坐标"
-                  style={{ width: 120 }}
+                  formatter={(value) => `${value}px`}
                 />
-                <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
               </Space.Compact>
           </Space>
         </div>
@@ -1095,8 +1551,9 @@ export default function RightSidebar({ canvas, selectedObject, onOpenImageEdit, 
             block
             size="small"
             onClick={() => {
-              if (onOpenImageEdit) {
-                onOpenImageEdit(imageObject, 'crop');
+              // 调用父组件的裁剪模式函数
+              if (onEnterCropMode) {
+                onEnterCropMode(imageObject);
               }
             }}
           >
@@ -1108,25 +1565,13 @@ export default function RightSidebar({ canvas, selectedObject, onOpenImageEdit, 
             block
             size="small"
             onClick={() => {
-              if (onOpenImageEdit) {
-                onOpenImageEdit(imageObject, 'magicWand');
+              // 调用父组件的魔法棒模式函数
+              if (onEnterMagicWandMode) {
+                onEnterMagicWandMode(imageObject);
               }
             }}
           >
             魔法棒抠图
-          </Button>
-          
-          {/* 消除区域 */}
-          <Button
-            block
-            size="small"
-            onClick={() => {
-              if (onOpenImageEdit) {
-                onOpenImageEdit(imageObject, 'erase');
-              }
-            }}
-          >
-            消除区域
           </Button>
           
           {/* 复制 */}
@@ -1234,6 +1679,20 @@ export default function RightSidebar({ canvas, selectedObject, onOpenImageEdit, 
             }}
           >
             删除
+          </Button>
+          
+          {/* 消除某个区域 */}
+          <Button
+            block
+            size="small"
+            onClick={() => {
+              // 调用父组件的消除区域模式函数
+              if (onEnterEraseMode) {
+                onEnterEraseMode(imageObject);
+              }
+            }}
+          >
+            消除区域
           </Button>
         </div>
 
@@ -1770,11 +2229,8 @@ export default function RightSidebar({ canvas, selectedObject, onOpenImageEdit, 
                   const newScaleX = (value || originalWidth) / originalWidth;
                   updateImage({ scaleX: newScaleX });
                 }}
-                controls={true}
-                placeholder="宽度"
-                style={{ width: 120 }}
+                formatter={(value) => `${value}px`}
               />
-              <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
             </Space.Compact>
             <Space.Compact>
               <span style={{ width: 40, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">高</span>
@@ -1787,11 +2243,8 @@ export default function RightSidebar({ canvas, selectedObject, onOpenImageEdit, 
                   const newScaleY = (value || originalHeight) / originalHeight;
                   updateImage({ scaleY: newScaleY });
                 }}
-                controls={true}
-                placeholder="高度"
-                style={{ width: 120 }}
+                formatter={(value) => `${value}px`}
               />
-              <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
             </Space.Compact>
           </Space>
         </div>
@@ -1809,11 +2262,8 @@ export default function RightSidebar({ canvas, selectedObject, onOpenImageEdit, 
                   onChange={(value) => {
                     updateImage({ left: value || 0 })
                   }}
-                  controls={true}
-                  placeholder="X坐标"
-                  style={{ width: 120 }}
+                  formatter={(value) => `${value}px`}
                 />
-                <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
               </Space.Compact>
             <Space.Compact>
                 <span style={{ width: 40, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">Y</span>
@@ -1822,11 +2272,8 @@ export default function RightSidebar({ canvas, selectedObject, onOpenImageEdit, 
                   onChange={(value) => {
                     updateImage({ top: value || 0 })
                   }}
-                  controls={true}
-                  placeholder="Y坐标"
-                  style={{ width: 120 }}
+                  formatter={(value) => `${value}px`}
                 />
-                <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
               </Space.Compact>
           </Space>
         </div>
@@ -2253,11 +2700,8 @@ export default function RightSidebar({ canvas, selectedObject, onOpenImageEdit, 
                   setShapeWidth(newWidth)
                   updateShape({ width: newWidth })
                 }}
-                controls={true}
-                placeholder="宽度"
-                style={{ width: 120 }}
+                formatter={(value) => `${value}px`}
               />
-              <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
             </Space.Compact>
             <Space.Compact>
               <Input readOnly value="高" style={{ width: 40 }} />
@@ -2268,11 +2712,8 @@ export default function RightSidebar({ canvas, selectedObject, onOpenImageEdit, 
                   setShapeHeight(newHeight)
                   updateShape({ height: newHeight })
                 }}
-                controls={true}
-                placeholder="高度"
-                style={{ width: 120 }}
+                formatter={(value) => `${value}px`}
               />
-              <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
             </Space.Compact>
           </Space>
         </div>
@@ -2292,11 +2733,8 @@ export default function RightSidebar({ canvas, selectedObject, onOpenImageEdit, 
                   setShapeLeft(newLeft)
                   updateShape({ left: newLeft })
                 }}
-                controls={true}
-                placeholder="X坐标"
-                style={{ width: 120 }}
+                formatter={(value) => `${value}px`}
               />
-              <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
             </Space.Compact>
             <Space.Compact>
               <Input readOnly value="Y" style={{ width: 40 }} />
@@ -2307,11 +2745,8 @@ export default function RightSidebar({ canvas, selectedObject, onOpenImageEdit, 
                   setShapeTop(newTop)
                   updateShape({ top: newTop })
                 }}
-                controls={true}
-                placeholder="Y坐标"
-                style={{ width: 120 }}
+                formatter={(value) => `${value}px`}
               />
-              <Input readOnly value="px" style={{ width: 30, textAlign: 'center' }} />
             </Space.Compact>
           </Space>
         </div>

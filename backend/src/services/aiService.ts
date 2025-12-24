@@ -158,7 +158,7 @@ export class AIService {
 
       // 检查响应状态
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
+        const errorData = await response.json().catch(() => ({})) as { message?: string }
         if (response.status === 403 && errorData.message && errorData.message.includes('does not support synchronous calls')) {
           throw new Error(
             '通义万相API不支持同步调用。为了正确实现此功能，需要：\n' +
@@ -173,7 +173,14 @@ export class AIService {
       }
 
       // 正常处理API响应（如果API调用成功）
-      const data = await response.json()
+      const data = await response.json() as {
+        output?: {
+          results?: Array<{ url?: string }>
+        }
+        usage?: {
+          input_tokens?: number
+        }
+      }
       
       // 检查响应数据结构
       if (!data.output || !Array.isArray(data.output.results) || data.output.results.length === 0) {
