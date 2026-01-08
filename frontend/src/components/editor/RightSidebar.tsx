@@ -30,12 +30,73 @@ interface RightSidebarProps {
   onEnterEraseMode?: (target: fabric.Object) => void
   zoom?: number
   onZoomChange?: (zoom: number) => void
+  onFormatBrushActive?: (type: 'text' | 'image' | 'shape' | null, styles: any) => void
 }
 
-export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, onEnterMagicWandMode, onEnterEraseMode, zoom = 1, onZoomChange }: RightSidebarProps) {
+export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, onEnterMagicWandMode, onEnterEraseMode, zoom = 1, onZoomChange, onFormatBrushActive }: RightSidebarProps) {
   // 所有Hooks必须在组件顶层调用
   // 面板状态
   const [activePanel, setActivePanel] = useState<'canvas' | 'text' | 'image' | 'shape' | 'group' | null>(null);
+  
+  // 格式刷状态
+  const [formatBrushActive, setFormatBrushActive] = useState<'text' | 'image' | 'shape' | null>(null);
+  const [formatBrushStyles, setFormatBrushStyles] = useState<any>(null);
+  
+  // 提取文字样式（排除位置和尺寸）
+  const extractTextStyles = (textObject: fabric.Textbox): any => {
+    return {
+      fontSize: textObject.fontSize,
+      fontFamily: textObject.fontFamily,
+      fontWeight: textObject.fontWeight,
+      fontStyle: textObject.fontStyle,
+      fill: textObject.fill,
+      textAlign: textObject.textAlign,
+      textDecoration: textObject.textDecoration,
+      underline: textObject.underline,
+      linethrough: textObject.linethrough,
+      overline: textObject.overline,
+      charSpacing: textObject.charSpacing,
+      lineHeight: textObject.lineHeight,
+      angle: textObject.angle,
+      opacity: textObject.opacity,
+      shadow: textObject.shadow,
+      stroke: textObject.stroke,
+      strokeWidth: textObject.strokeWidth,
+      // 不包含：left, top, width, height, scaleX, scaleY
+    }
+  }
+  
+  // 提取图片样式（排除位置和尺寸）
+  const extractImageStyles = (imageObject: fabric.Image): any => {
+    return {
+      angle: imageObject.angle,
+      opacity: imageObject.opacity,
+      shadow: imageObject.shadow,
+      stroke: imageObject.stroke,
+      strokeWidth: imageObject.strokeWidth,
+      filters: imageObject.filters,
+      // 不包含：left, top, width, height, scaleX, scaleY
+    }
+  }
+  
+  // 提取图形样式（排除位置和尺寸）
+  const extractShapeStyles = (shapeObject: fabric.Object): any => {
+    return {
+      fill: shapeObject.fill,
+      stroke: shapeObject.stroke,
+      strokeWidth: shapeObject.strokeWidth,
+      strokeDashArray: shapeObject.strokeDashArray,
+      angle: shapeObject.angle,
+      opacity: shapeObject.opacity,
+      shadow: shapeObject.shadow,
+      // 对于矩形，还包含圆角
+      ...(shapeObject.type === 'rect' && {
+        rx: (shapeObject as fabric.Rect).rx,
+        ry: (shapeObject as fabric.Rect).ry,
+      }),
+      // 不包含：left, top, width, height, scaleX, scaleY
+    }
+  }
   
   // 新增的文字属性状态管理钩子
   const [lineHeight, setLineHeight] = useState<number>(1.2);
@@ -594,20 +655,21 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                 }}
                 disabled={zoom <= 0.1}
               />
-              <InputNumber
-                value={Math.round(zoom * 100)}
-                min={10}
-                max={500}
-                formatter={(value) => `${value}%`}
-                parser={(value) => parseFloat(value?.replace('%', '') || '100') / 100}
-                onChange={(value) => {
-                  if (value !== null) {
-                    const newZoom = Math.max(0.1, Math.min(5, value / 100))
-                    onZoomChange(newZoom)
-                  }
-                }}
-                style={{ flex: 1 }}
-              />
+              <Space.Compact style={{ flex: 1 }}>
+                <InputNumber
+                  value={Math.round(zoom * 100)}
+                  min={10}
+                  max={500}
+                  onChange={(value) => {
+                    if (value !== null) {
+                      const newZoom = Math.max(0.1, Math.min(5, value / 100))
+                      onZoomChange(newZoom)
+                    }
+                  }}
+                  style={{ flex: 1 }}
+                />
+                <span style={{ width: 30, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">%</span>
+              </Space.Compact>
               <Button 
                 icon={<PlusOutlined />}
                 onClick={() => {
@@ -754,12 +816,150 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
   if (activePanel === 'text' && (selectedObject.type === 'textbox' || selectedObject.type === 'text')) {
     const textObject = selectedObject as fabric.Textbox
     
+    // ⭐ 核心修复：验证 textObject 是否为有效的 fabric.js 对象
+    if (!textObject || typeof textObject !== 'object') {
+      return null
+    }
+    
     // 获取文字类型（如果有设置）
     const textType = (textObject as any).__type || '普通文字';
 
     const updateText = (updates: Partial<fabric.ITextboxOptions>) => {
-      textObject.set(updates)
-      canvas.renderAll()
+      // ⭐ 核心修复：验证 textObject 和 canvas 是否存在
+      if (!textObject || !canvas) {
+        console.error('updateText: textObject 或 canvas 不存在')
+        return
+      }
+      
+      // ⭐ 核心修复：字间距更新需要特殊处理
+      if ('charSpacing' in updates && updates.charSpacing !== undefined) {
+        // ⚠️ 重要：Fabric.js 的 charSpacing 单位是 1/1000 em，不是像素！
+        // 用户输入的是像素值（px），需要转换为 1/1000 em
+        // 公式：charSpacing (1/1000 em) = (px值 / fontSize) * 1000
+        const fontSize = textObject.fontSize || 16 // 获取当前字体大小
+        const pxValue = updates.charSpacing // 用户输入的像素值
+        const newCharSpacing = (pxValue / fontSize) * 1000 // 转换为 1/1000 em
+        
+        // 方法1：直接设置属性（最可靠的方式）
+        // 先获取旧值（使用 get 方法或直接访问）
+        let oldCharSpacing = 0
+        try {
+          const oldCharSpacingInEm = (textObject as any).charSpacing ?? 0
+          // 将旧值从 1/1000 em 转换回像素，用于显示
+          oldCharSpacing = (oldCharSpacingInEm / 1000) * fontSize
+        } catch (e) {
+          // 如果读取失败，使用默认值
+          oldCharSpacing = 0
+        }
+        
+        // 设置新值（1/1000 em 单位）
+        (textObject as any).charSpacing = newCharSpacing
+        
+        // 验证设置是否成功
+        const actualCharSpacing = (textObject as any).charSpacing
+        const actualCharSpacingInPx = (actualCharSpacing / 1000) * fontSize
+        console.log('字间距更新:', { 
+          oldCharSpacing, 
+          newCharSpacing: pxValue, 
+          actualInPx: actualCharSpacingInPx,
+          actualInEm: actualCharSpacing,
+          fontSize 
+        })
+        
+        // 方法2：尝试使用 set 方法（如果存在且可用），这会触发内部更新机制和事件
+        if (typeof (textObject as any).set === 'function') {
+          try {
+            // 使用 set 方法更新，这会触发内部更新机制和事件
+            (textObject as any).set('charSpacing', newCharSpacing)
+            console.log('set 方法调用成功')
+          } catch (e) {
+            // 如果 set 失败，我们已经用直接属性赋值了，所以继续
+            console.warn('set 方法失败，但已使用直接属性赋值:', e)
+          }
+        } else {
+          console.warn('textObject.set 不是函数，类型:', typeof (textObject as any).set)
+        }
+        
+        // 标记对象为已修改（dirty），强制重新渲染
+        // dirty 是一个属性，不是方法
+        (textObject as any).dirty = true
+        
+        // 如果对象有 setDirty 方法，也调用它
+        if (typeof (textObject as any).setDirty === 'function') {
+          try {
+            (textObject as any).setDirty(true)
+          } catch (e) {
+            // 忽略错误
+          }
+        }
+        
+        // 清除文本缓存（fabric.js 内部方法）
+        if (typeof (textObject as any)._clearCache === 'function') {
+          try {
+            (textObject as any)._clearCache()
+          } catch (e) {
+            console.warn('_clearCache 调用失败:', e)
+          }
+        }
+        
+        // 重新初始化文本尺寸（这会重新计算文本的宽度和高度）
+        if (typeof (textObject as any).initDimensions === 'function') {
+          try {
+            (textObject as any).initDimensions()
+          } catch (e) {
+            console.warn('initDimensions 调用失败:', e)
+          }
+        }
+        
+        // 重新计算文本边界框
+        if (typeof (textObject as any).setCoords === 'function') {
+          try {
+            (textObject as any).setCoords()
+          } catch (e) {
+            console.warn('setCoords 调用失败:', e)
+          }
+        }
+        
+        // 触发对象修改事件
+        canvas.fire('object:modified', { target: textObject })
+        
+        // 强制重新渲染（使用 renderAll 而不是 requestRenderAll，确保立即渲染）
+        console.log('开始渲染画布，charSpacing:', (textObject as any).charSpacing)
+        canvas.renderAll()
+        
+        // 延迟再次渲染，确保更新生效
+        setTimeout(() => {
+          console.log('延迟渲染，charSpacing:', (textObject as any).charSpacing)
+          canvas.renderAll()
+          // 再次触发修改事件，确保状态同步
+          canvas.fire('object:modified', { target: textObject })
+        }, 50)
+        
+        // 再次延迟渲染，确保所有更新都生效
+        setTimeout(() => {
+          console.log('最终渲染，charSpacing:', (textObject as any).charSpacing)
+          canvas.renderAll()
+        }, 100)
+      } else {
+        // 对于其他属性，使用 set 方法（如果存在）
+        if (typeof (textObject as any).set === 'function') {
+          try {
+            (textObject as any).set(updates)
+          } catch (e) {
+            console.warn('textObject.set 调用失败，使用直接属性赋值:', e)
+            // 如果 set 方法失败，直接设置属性
+            Object.keys(updates).forEach(key => {
+              (textObject as any)[key] = (updates as any)[key]
+            })
+          }
+        } else {
+          // 如果 set 方法不存在，直接设置属性
+          Object.keys(updates).forEach(key => {
+            (textObject as any)[key] = (updates as any)[key]
+          })
+        }
+        canvas.renderAll()
+      }
       // 手动触发画布变化事件，确保保存历史记录
       canvas.fire('object:modified', { target: textObject });
     }
@@ -875,7 +1075,25 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
             block
             icon={textObject.selectable ? <UnlockOutlined /> : <LockOutlined />}
             onClick={() => {
-              textObject.set({ selectable: !textObject.selectable, evented: !textObject.evented })
+              // ⭐ 核心修复：安全地设置属性
+              const currentSelectable = (textObject as any).selectable ?? true
+              const currentEvented = (textObject as any).evented ?? true
+              const newSelectable = !currentSelectable
+              const newEvented = !currentEvented
+              
+              if (typeof (textObject as any).set === 'function') {
+                try {
+                  (textObject as any).set({ selectable: newSelectable, evented: newEvented })
+                } catch (e) {
+                  // 如果 set 失败，直接设置属性
+                  (textObject as any).selectable = newSelectable
+                  (textObject as any).evented = newEvented
+                }
+              } else {
+                // 直接设置属性
+                (textObject as any).selectable = newSelectable
+                (textObject as any).evented = newEvented
+              }
               canvas.renderAll()
               canvas.fire('object:modified', { target: textObject });
             }}
@@ -885,6 +1103,37 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
         </div>
 
         <Divider className="my-2" />
+
+        {/* 格式刷 */}
+        <div className="mb-2">
+          <Button 
+            block 
+            type={formatBrushActive === 'text' ? 'primary' : 'default'}
+            icon={<FormatPainterOutlined />}
+            onClick={() => {
+              if (formatBrushActive === 'text') {
+                // 取消格式刷
+                setFormatBrushActive(null)
+                setFormatBrushStyles(null)
+                if (onFormatBrushActive) {
+                  onFormatBrushActive(null, null)
+                }
+                message.info('已取消格式刷')
+              } else {
+                // 激活格式刷
+                const styles = extractTextStyles(textObject)
+                setFormatBrushActive('text')
+                setFormatBrushStyles(styles)
+                if (onFormatBrushActive) {
+                  onFormatBrushActive('text', styles)
+                }
+                message.success('格式刷已激活，点击其他文字元素应用样式')
+              }
+            }}
+          >
+            {formatBrushActive === 'text' ? '格式刷（已激活）' : '格式刷'}
+          </Button>
+        </div>
 
         {/* 复制/删除 */}
         <Space className="w-full">
@@ -994,8 +1243,8 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                 setFontSize(newSize)
                 updateText({ fontSize: newSize })
               }}
-              formatter={(value) => `${value}px`}
             />
+            <span style={{ width: 30, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">px</span>
           </Space.Compact>
         </div>
 
@@ -1025,15 +1274,16 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
             <InputNumber
               style={{ flex: 1 }}
               min={-50}
-              max={100}
+              max={500}
               value={letterSpacing}
               onChange={(value) => {
                 const newLetterSpacing = value || 0
                 setLetterSpacing(newLetterSpacing)
+                // ⭐ 核心修复：使用 updateText 函数来更新字间距
                 updateText({ charSpacing: newLetterSpacing })
               }}
-              formatter={(value) => `${value}px`}
             />
+            <span style={{ width: 30, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">px</span>
           </Space.Compact>
         </div>
 
@@ -1152,8 +1402,8 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                 setOpacity(value || 0)
                 updateText({ opacity: newOpacity })
               }}
-              formatter={(value) => `${value}%`}
             />
+            <span style={{ width: 30, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">%</span>
           </Space.Compact>
         </div>
 
@@ -1170,8 +1420,8 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                 onChange={(value) => {
                   updateText({ width: value || 0 })
                 }}
-                formatter={(value) => `${value}px`}
               />
+              <span style={{ width: 30, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">px</span>
             </Space.Compact>
             <Space.Compact>
                 <span style={{ width: 40, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">高</span>
@@ -1180,8 +1430,8 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                   onChange={(value) => {
                     updateText({ height: value || 0 })
                   }}
-                  formatter={(value) => `${value}px`}
                 />
+                <span style={{ width: 30, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">px</span>
               </Space.Compact>
           </Space>
         </div>
@@ -1199,8 +1449,8 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                   onChange={(value) => {
                     updateText({ left: value || 0 })
                   }}
-                  formatter={(value) => `${value}px`}
                 />
+                <span style={{ width: 30, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">px</span>
               </Space.Compact>
             <Space.Compact>
                 <span style={{ width: 40, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">Y</span>
@@ -1209,8 +1459,8 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                   onChange={(value) => {
                     updateText({ top: value || 0 })
                   }}
-                  formatter={(value) => `${value}px`}
                 />
+                <span style={{ width: 30, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">px</span>
               </Space.Compact>
           </Space>
         </div>
@@ -1574,6 +1824,36 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
             魔法棒抠图
           </Button>
           
+          {/* 格式刷 */}
+          <Button
+            block
+            size="small"
+            type={formatBrushActive === 'image' ? 'primary' : 'default'}
+            icon={<FormatPainterOutlined />}
+            onClick={() => {
+              if (formatBrushActive === 'image') {
+                // 取消格式刷
+                setFormatBrushActive(null)
+                setFormatBrushStyles(null)
+                if (onFormatBrushActive) {
+                  onFormatBrushActive(null, null)
+                }
+                message.info('已取消格式刷')
+              } else {
+                // 激活格式刷
+                const styles = extractImageStyles(imageObject)
+                setFormatBrushActive('image')
+                setFormatBrushStyles(styles)
+                if (onFormatBrushActive) {
+                  onFormatBrushActive('image', styles)
+                }
+                message.success('格式刷已激活，点击其他图片元素应用样式')
+              }
+            }}
+          >
+            {formatBrushActive === 'image' ? '格式刷（已激活）' : '格式刷'}
+          </Button>
+          
           {/* 复制 */}
           <Button
             block
@@ -1722,8 +2002,8 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                 setImageOpacity(value || 0)
                 updateImage({ opacity: newOpacity })
               }}
-              formatter={(value) => `${value}%`}
             />
+            <span style={{ width: 30, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">%</span>
           </Space.Compact>
         </div>
 
@@ -2229,8 +2509,8 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                   const newScaleX = (value || originalWidth) / originalWidth;
                   updateImage({ scaleX: newScaleX });
                 }}
-                formatter={(value) => `${value}px`}
               />
+              <span style={{ width: 30, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">px</span>
             </Space.Compact>
             <Space.Compact>
               <span style={{ width: 40, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">高</span>
@@ -2243,8 +2523,8 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                   const newScaleY = (value || originalHeight) / originalHeight;
                   updateImage({ scaleY: newScaleY });
                 }}
-                formatter={(value) => `${value}px`}
               />
+              <span style={{ width: 30, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">px</span>
             </Space.Compact>
           </Space>
         </div>
@@ -2262,8 +2542,8 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                   onChange={(value) => {
                     updateImage({ left: value || 0 })
                   }}
-                  formatter={(value) => `${value}px`}
                 />
+                <span style={{ width: 30, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">px</span>
               </Space.Compact>
             <Space.Compact>
                 <span style={{ width: 40, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">Y</span>
@@ -2272,8 +2552,8 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
                   onChange={(value) => {
                     updateImage({ top: value || 0 })
                   }}
-                  formatter={(value) => `${value}px`}
                 />
+                <span style={{ width: 30, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">px</span>
               </Space.Compact>
           </Space>
         </div>
@@ -2413,6 +2693,37 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
         </div>
 
         <Divider className="my-2" />
+
+        {/* 格式刷 */}
+        <div className="mb-2">
+          <Button 
+            block 
+            type={formatBrushActive === 'shape' ? 'primary' : 'default'}
+            icon={<FormatPainterOutlined />}
+            onClick={() => {
+              if (formatBrushActive === 'shape') {
+                // 取消格式刷
+                setFormatBrushActive(null)
+                setFormatBrushStyles(null)
+                if (onFormatBrushActive) {
+                  onFormatBrushActive(null, null)
+                }
+                message.info('已取消格式刷')
+              } else {
+                // 激活格式刷
+                const styles = extractShapeStyles(selectedObject)
+                setFormatBrushActive('shape')
+                setFormatBrushStyles(styles)
+                if (onFormatBrushActive) {
+                  onFormatBrushActive('shape', styles)
+                }
+                message.success('格式刷已激活，点击其他图形元素应用样式')
+              }
+            }}
+          >
+            {formatBrushActive === 'shape' ? '格式刷（已激活）' : '格式刷'}
+          </Button>
+        </div>
 
         {/* 复制/删除 */}
         <Space className="w-full">

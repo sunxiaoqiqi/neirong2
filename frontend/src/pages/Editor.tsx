@@ -125,6 +125,12 @@ export default function Editor() {
   /* ---------- guard ---------- */
   const isApplyingRef = useRef(false)
   const thumbTimerRef = useRef<number | null>(null)
+  
+  /* ---------- clipboard ---------- */
+  const clipboardRef = useRef<string | null>(null) // 保存复制的对象 JSON 数据
+  
+  /* ---------- format brush ---------- */
+  const formatBrushRef = useRef<{ type: 'text' | 'image' | 'shape' | null; styles: any }>({ type: null, styles: null })
 
   /* =========================
      refs 同步
@@ -455,6 +461,44 @@ export default function Editor() {
             left: selectedObj.left || 0,
             top: selectedObj.top || 0,
           })
+          
+          // ⭐ 格式刷应用逻辑
+          const formatBrush = formatBrushRef.current
+          if (formatBrush.type && formatBrush.styles) {
+            // 检查是否为同类型元素
+            const isText = (selectedObj.type === 'textbox' || selectedObj.type === 'text') && formatBrush.type === 'text'
+            const isImage = selectedObj.type === 'image' && formatBrush.type === 'image'
+            const isShape = (selectedObj.type === 'rect' || selectedObj.type === 'circle' || selectedObj.type === 'triangle' || selectedObj.type === 'ellipse' || selectedObj.name?.includes('Emoji')) && formatBrush.type === 'shape'
+            
+            if (isText || isImage || isShape) {
+              // 保存位置和尺寸
+              const savedLeft = selectedObj.left
+              const savedTop = selectedObj.top
+              const savedWidth = selectedObj.width
+              const savedHeight = selectedObj.height
+              const savedScaleX = selectedObj.scaleX
+              const savedScaleY = selectedObj.scaleY
+              
+              // 应用格式刷样式（排除位置和尺寸）
+              selectedObj.set(formatBrush.styles)
+              
+              // 恢复位置和尺寸
+              selectedObj.set({
+                left: savedLeft,
+                top: savedTop,
+                width: savedWidth,
+                height: savedHeight,
+                scaleX: savedScaleX,
+                scaleY: savedScaleY,
+              })
+              
+              selectedObj.setCoords()
+              canvas.renderAll()
+              canvas.fire('object:modified', { target: selectedObj })
+              
+              message.success('已应用格式刷样式')
+            }
+          }
         }
         setSelectedObject(selectedObj || null)
       }
@@ -490,6 +534,40 @@ export default function Editor() {
             left: selectedObj.left || 0,
             top: selectedObj.top || 0,
           })
+          
+          // ⭐ 格式刷应用逻辑（与 selection:created 相同）
+          const formatBrush = formatBrushRef.current
+          if (formatBrush.type && formatBrush.styles) {
+            const isText = (selectedObj.type === 'textbox' || selectedObj.type === 'text') && formatBrush.type === 'text'
+            const isImage = selectedObj.type === 'image' && formatBrush.type === 'image'
+            const isShape = (selectedObj.type === 'rect' || selectedObj.type === 'circle' || selectedObj.type === 'triangle' || selectedObj.type === 'ellipse' || selectedObj.name?.includes('Emoji')) && formatBrush.type === 'shape'
+            
+            if (isText || isImage || isShape) {
+              const savedLeft = selectedObj.left
+              const savedTop = selectedObj.top
+              const savedWidth = selectedObj.width
+              const savedHeight = selectedObj.height
+              const savedScaleX = selectedObj.scaleX
+              const savedScaleY = selectedObj.scaleY
+              
+              selectedObj.set(formatBrush.styles)
+              
+              selectedObj.set({
+                left: savedLeft,
+                top: savedTop,
+                width: savedWidth,
+                height: savedHeight,
+                scaleX: savedScaleX,
+                scaleY: savedScaleY,
+              })
+              
+              selectedObj.setCoords()
+              canvas.renderAll()
+              canvas.fire('object:modified', { target: selectedObj })
+              
+              message.success('已应用格式刷样式')
+            }
+          }
         }
         setSelectedObject(selectedObj || null)
       }
@@ -527,18 +605,148 @@ export default function Editor() {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement
       
+      // 检查是否在输入框、文本区域或可编辑元素中
+      const isInputElement = target.tagName === 'INPUT' || 
+          target.tagName === 'TEXTAREA' || 
+          target.isContentEditable ||
+          target.closest('.ant-input') ||
+          target.closest('.ant-input-number') ||
+          target.closest('.ant-select') ||
+          target.closest('.ant-modal') ||
+          target.closest('.ant-drawer')
+      
+      // 处理 Ctrl+C (复制)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !isInputElement) {
+        const activeObject = canvas.getActiveObject()
+        
+        // 检查是否处于文本编辑模式
+        const isTextEditing = activeObject && 
+          (activeObject.type === 'i-text' || activeObject.type === 'textbox' || activeObject.type === 'text') &&
+          (activeObject as any).isEditing
+        
+        // 如果有选中的对象且不是处于文本编辑模式
+        if (activeObject && !isTextEditing && !canvas.isDrawingMode) {
+          e.preventDefault()
+          e.stopPropagation()
+          
+          try {
+            // 处理多选情况
+            if (activeObject.type === 'activeSelection') {
+              // 多选：复制所有选中的对象
+              const activeSelection = activeObject as fabric.ActiveSelection
+              const objects = activeSelection.getObjects()
+              
+              // 序列化所有对象
+              const objectsData = objects.map(obj => obj.toJSON())
+              clipboardRef.current = JSON.stringify(objectsData)
+              
+              message.success(`已复制 ${objects.length} 个对象`)
+            } else {
+              // 单选：复制单个对象
+              const objectData = activeObject.toJSON()
+              clipboardRef.current = JSON.stringify([objectData])
+              
+              message.success('已复制对象')
+            }
+          } catch (error) {
+            console.error('复制对象失败:', error)
+            message.error('复制失败')
+          }
+        }
+        return
+      }
+      
+      // 处理 Ctrl+V (粘贴)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v' && !isInputElement) {
+        if (!clipboardRef.current) {
+          return // 没有复制的内容
+        }
+        
+        // 检查是否处于文本编辑模式
+        const activeObject = canvas.getActiveObject()
+        const isTextEditing = activeObject && 
+          (activeObject.type === 'i-text' || activeObject.type === 'textbox' || activeObject.type === 'text') &&
+          (activeObject as any).isEditing
+        
+        if (isTextEditing || canvas.isDrawingMode) {
+          return // 文本编辑模式或绘制模式下不粘贴
+        }
+        
+        e.preventDefault()
+        e.stopPropagation()
+        
+        try {
+          // 解析复制的对象数据
+          const objectsData = JSON.parse(clipboardRef.current)
+          
+          if (!Array.isArray(objectsData) || objectsData.length === 0) {
+            message.warning('没有可粘贴的内容')
+            return
+          }
+          
+          // 清除当前选择
+          canvas.discardActiveObject()
+          
+          // 计算粘贴偏移量（默认偏移 20px）
+          const offset = 20
+          
+          // 加载并添加所有复制的对象
+          const loadedObjects: fabric.Object[] = []
+          
+          fabric.util.enlivenObjects(objectsData, (objects: fabric.Object[]) => {
+            objects.forEach((obj, index) => {
+              // 设置新位置（偏移）
+              const originalLeft = (obj.left || 0)
+              const originalTop = (obj.top || 0)
+              
+              obj.set({
+                left: originalLeft + offset,
+                top: originalTop + offset,
+              })
+              
+              // 生成新的 ID（如果有）
+              if ((obj as any).id) {
+                (obj as any).id = `${(obj as any).id}_copy_${Date.now()}_${index}`
+              }
+              
+              // 添加到画布
+              canvas.add(obj)
+              loadedObjects.push(obj)
+            })
+            
+            // 如果只有一个对象，选中它；如果有多个，创建多选
+            if (loadedObjects.length === 1) {
+              canvas.setActiveObject(loadedObjects[0])
+              setSelectedObject(loadedObjects[0])
+            } else if (loadedObjects.length > 1) {
+              // 创建多选
+              const selection = new fabric.ActiveSelection(loadedObjects, {
+                canvas: canvas,
+              })
+              canvas.setActiveObject(selection)
+              setSelectedObject(selection)
+            }
+            
+            // 重新渲染
+            canvas.renderAll()
+            
+            // 触发变更
+            setTimeout(() => {
+              onChange()
+            }, 10)
+            
+            message.success(`已粘贴 ${loadedObjects.length} 个对象`)
+          }, 'fabric')
+        } catch (error) {
+          console.error('粘贴对象失败:', error)
+          message.error('粘贴失败')
+        }
+        return
+      }
+      
       // 检查是否按下了删除键或退格键
       if (e.key === 'Delete' || e.key === 'Backspace' || e.code === 'Delete' || e.code === 'Backspace') {
-        // 检查是否是在输入框、文本区域或可编辑元素中按下的键
-        const isInputElement = target.tagName === 'INPUT' || 
-            target.tagName === 'TEXTAREA' || 
-            target.isContentEditable ||
-            target.closest('.ant-input') ||
-            target.closest('.ant-input-number') ||
-            target.closest('.ant-select') ||
-            target.closest('.ant-modal') ||
-            target.closest('.ant-drawer')
-        
+        // 已经在上面定义了 isInputElement，这里直接使用
         if (isInputElement) {
           return
         }
@@ -669,7 +877,7 @@ export default function Editor() {
     const canvas = canvasRef.current
     if (!canvas) return
 
-    const json = JSON.stringify(canvas.toJSON())
+    const json = JSON.stringify(canvas.toJSON(['crossOrigin']))
     const idx = currentPageIndexRef.current
 
     setPages(p => {
@@ -690,6 +898,8 @@ export default function Editor() {
       }
 
       n[idx] = page
+      // ⭐ 核心修复：同步更新 pagesRef.current
+      pagesRef.current = n
       return n
     })
 
@@ -719,9 +929,61 @@ export default function Editor() {
 
     canvas.clear()
     canvas.loadFromJSON(parsed, () => {
-      canvas.renderAll()
-      if (!page.thumbnail) scheduleThumbnail()
-      isApplyingRef.current = false
+      // ⭐ 核心修复：确保所有图片都加载完成后再渲染
+      const objects = canvas.getObjects()
+      const imageObjects = objects.filter((obj: any) => obj.type === 'image') as fabric.Image[]
+      
+      if (imageObjects.length > 0) {
+        // 等待所有图片加载完成
+        Promise.all(
+          imageObjects.map((img: fabric.Image) => {
+            return new Promise<void>((resolve) => {
+              const checkImage = () => {
+                try {
+                  const imgElement = img.getElement?.() as HTMLImageElement | undefined
+                  if (imgElement) {
+                    if (imgElement.complete && imgElement.naturalWidth > 0) {
+                      resolve()
+                    } else {
+                      imgElement.onload = () => resolve()
+                      imgElement.onerror = () => resolve() // 即使加载失败也继续
+                      // 设置超时，避免无限等待
+                      setTimeout(() => resolve(), 5000)
+                    }
+                  } else {
+                    // 如果获取不到元素，等待一下再试
+                    setTimeout(() => {
+                      if (img.getElement?.()) {
+                        checkImage()
+                      } else {
+                        resolve() // 如果还是获取不到，直接 resolve
+                      }
+                    }, 100)
+                  }
+                } catch (e) {
+                  resolve() // 即使出错也继续
+                }
+              }
+              checkImage()
+            })
+          })
+        ).then(() => {
+          canvas.renderAll()
+          if (!page.thumbnail) scheduleThumbnail()
+          isApplyingRef.current = false
+        })
+      } else {
+        canvas.renderAll()
+        if (!page.thumbnail) scheduleThumbnail()
+        isApplyingRef.current = false
+      }
+    }, (o: any, object: fabric.Object) => {
+      // ⭐ 核心修复：在加载每个对象时，如果是图片，确保正确设置 crossOrigin
+      if (object.type === 'image') {
+        (object as fabric.Image).set({
+          crossOrigin: 'anonymous'
+        })
+      }
     })
   }
 
@@ -1562,8 +1824,59 @@ export default function Editor() {
     const parsed = JSON.parse(page.json)
     return new Promise<void>(resolve => {
       canvas.loadFromJSON(parsed, () => {
-        canvas.renderAll()
-        resolve()
+        // ⭐ 核心修复：确保所有图片都加载完成后再渲染
+        const objects = canvas.getObjects()
+        const imageObjects = objects.filter((obj: any) => obj.type === 'image') as fabric.Image[]
+        
+        if (imageObjects.length > 0) {
+          // 等待所有图片加载完成
+          Promise.all(
+            imageObjects.map((img: fabric.Image) => {
+              return new Promise<void>((imgResolve) => {
+                const checkImage = () => {
+                  try {
+                    const imgElement = img.getElement?.() as HTMLImageElement | undefined
+                    if (imgElement) {
+                      if (imgElement.complete && imgElement.naturalWidth > 0) {
+                        imgResolve()
+                      } else {
+                        imgElement.onload = () => imgResolve()
+                        imgElement.onerror = () => imgResolve() // 即使加载失败也继续
+                        // 设置超时，避免无限等待
+                        setTimeout(() => imgResolve(), 5000)
+                      }
+                    } else {
+                      // 如果获取不到元素，等待一下再试
+                      setTimeout(() => {
+                        if (img.getElement?.()) {
+                          checkImage()
+                        } else {
+                          imgResolve() // 如果还是获取不到，直接 resolve
+                        }
+                      }, 100)
+                    }
+                  } catch (e) {
+                    imgResolve() // 即使出错也继续
+                  }
+                }
+                checkImage()
+              })
+            })
+          ).then(() => {
+            canvas.renderAll()
+            resolve()
+          })
+        } else {
+          canvas.renderAll()
+          resolve()
+        }
+      }, (o: any, object: fabric.Object) => {
+        // ⭐ 核心修复：在加载每个对象时，如果是图片，确保正确设置 crossOrigin
+        if (object.type === 'image') {
+          (object as fabric.Image).set({
+            crossOrigin: 'anonymous'
+          })
+        }
       })
     })
   }
@@ -2010,16 +2323,16 @@ export default function Editor() {
         
         message.warning('无法加载原始图片，使用备用图片')
         // 直接使用fabric加载备用图片
-        fabric.Image.fromURL(fallbackImageUrl, (fallbackImg) => {
-          setupAndAddImageToCanvas(fallbackImg, canvas)
+        fabric.Image.fromURL(fallbackImageUrl, async (fallbackImg) => {
+          await setupAndAddImageToCanvas(fallbackImg, canvas)
           message.warning('已使用备用图片替代，请检查原始图片URL')
         }, options)
         return
       }
 
       // 使用fabric.js创建图片对象
-      fabric.Image.fromURL(imageUrl, (img) => {
-        setupAndAddImageToCanvas(img, canvas)
+      fabric.Image.fromURL(imageUrl, async (img) => {
+        await setupAndAddImageToCanvas(img, canvas)
         message.success('图片添加成功')
       }, options)
     } catch (error) {
@@ -2028,8 +2341,78 @@ export default function Editor() {
     }
   }
   
+  // 辅助函数：将图片转换为 data URL（如果是 blob URL）
+  const convertImageToDataURL = async (img: fabric.Image): Promise<string | null> => {
+    try {
+      const imgElement = img.getElement?.() as HTMLImageElement | undefined
+      if (!imgElement || !imgElement.src) return null
+      
+      const src = imgElement.src
+      
+      // 如果已经是 data URL，直接返回
+      if (src.startsWith('data:')) {
+        return src
+      }
+      
+      // 如果是 blob URL，转换为 data URL
+      if (src.startsWith('blob:')) {
+        try {
+          const response = await fetch(src)
+          const blob = await response.blob()
+          return new Promise<string>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onloadend = () => resolve(reader.result as string)
+            reader.onerror = reject
+            reader.readAsDataURL(blob)
+          })
+        } catch (e) {
+          console.error('转换 blob URL 失败:', e)
+          return null
+        }
+      }
+      
+      // 普通 URL，尝试转换为 data URL
+      try {
+        const response = await fetch(src)
+        const blob = await response.blob()
+        return new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onloadend = () => resolve(reader.result as string)
+          reader.onerror = reject
+          reader.readAsDataURL(blob)
+        })
+      } catch (e) {
+        // 如果转换失败，返回原始 URL
+        return src
+      }
+    } catch (e) {
+      console.error('转换图片失败:', e)
+      return null
+    }
+  }
+
   // 辅助函数：设置图片属性并添加到画布
-  const setupAndAddImageToCanvas = (img: fabric.Image, canvas: fabric.Canvas) => {
+  const setupAndAddImageToCanvas = async (img: fabric.Image, canvas: fabric.Canvas) => {
+    // ⭐ 核心修复：先将图片转换为 data URL（如果是 blob URL）
+    const dataURL = await convertImageToDataURL(img)
+    if (dataURL && dataURL !== img.getElement?.()?.src) {
+      // 如果转换成功且与原始 URL 不同，重新创建图片对象
+      try {
+        const newImg = await new Promise<fabric.Image>((resolve, reject) => {
+          fabric.Image.fromURL(dataURL, (newImage) => {
+            if (newImage) {
+              resolve(newImage)
+            } else {
+              reject(new Error('图片加载失败'))
+            }
+          }, { crossOrigin: 'anonymous' })
+        })
+        img = newImg
+      } catch (e) {
+        console.error('重新加载图片失败，使用原图片:', e)
+      }
+    }
+    
     // 设置图片属性
     img.set({
       selectable: true,
@@ -2042,7 +2425,8 @@ export default function Editor() {
       lockScalingY: false,
       lockUniScaling: false,
       opacity: 1,
-      id: `image_${Date.now()}`
+      id: `image_${Date.now()}`,
+      crossOrigin: 'anonymous'
     })
     
     // 计算图片缩放比例，使其适应画布
@@ -2307,6 +2691,9 @@ export default function Editor() {
               onEnterCropMode={handleEnterCropMode}
               onEnterMagicWandMode={handleEnterMagicWandMode}
               onEnterEraseMode={handleEnterEraseMode}
+              onFormatBrushActive={(type, styles) => {
+                formatBrushRef.current = { type, styles }
+              }}
             />
           </div>
         </div>

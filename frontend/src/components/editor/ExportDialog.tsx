@@ -24,6 +24,9 @@ export default function ExportDialog({
     if (visible) {
       // 默认全选所有页面
       setSelectedPages(Array.from({ length: pageCount }, (_, i) => i + 1))
+      // ⭐ 核心修复：重置导出状态，确保每次打开对话框时按钮可用
+      setExporting(false)
+      setProgress(0)
     }
   }, [visible, pageCount])
 
@@ -76,13 +79,14 @@ export default function ExportDialog({
           // 确保只调用一次导出
           if (!hasExported) {
             hasExported = true
-            setExporting(false)
-            // 先调用导出，再关闭对话框，避免状态更新冲突
-            // 使用 setTimeout 确保状态更新完成后再关闭对话框
+            // ⭐ 核心修复：先调用导出，然后重置状态，不关闭对话框，让用户可以继续导出
+            onExport(exportFormat, exportPages)
+            
+            // 延迟重置状态，确保导出操作完成
             setTimeout(() => {
-              onExport(exportFormat, exportPages)
-              onCancel()
-            }, 0)
+              setExporting(false)
+              setProgress(0)
+            }, 500)
           }
           
           return 100
