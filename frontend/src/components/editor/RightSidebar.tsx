@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { Button, InputNumber, Input, Select, Slider, Space, Divider, Radio, Modal, message, Switch } from 'antd'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Button, InputNumber, Input, Select, Slider, Space, Divider, Radio, Modal, message, Switch, Drawer } from 'antd'
 import {
   ArrowUpOutlined,
   ArrowDownOutlined,
@@ -18,6 +18,7 @@ import {
   VerticalAlignMiddleOutlined,
   BorderOuterOutlined,
   UngroupOutlined,
+  OrderedListOutlined,
 } from '@ant-design/icons'
 import { fabric } from 'fabric'
 import ColorPickerWithEyeDropper from './ColorPickerWithEyeDropper'
@@ -72,6 +73,21 @@ export default function RightSidebar({
   // 格式刷状态
   const [formatBrushActive, setFormatBrushActive] = useState<'text' | 'image' | 'shape' | null>(null);
   const [formatBrushStyles, setFormatBrushStyles] = useState<any>(null);
+  
+  // 序号功能状态
+  const [bulletModalVisible, setBulletModalVisible] = useState(false)
+  const [bulletType, setBulletType] = useState<'number' | 'dot' | 'circle' | 'diamond' | 'emptyDiamond' | 'arrow' | 'square' | 'emptySquare' | 'triangle' | 'emptyTriangle' | 'star' | 'emptyStar'>('number')
+  const [bulletColor, setBulletColor] = useState('#000000')
+  const [bulletSize, setBulletSize] = useState(16)
+  const [bulletPosition, setBulletPosition] = useState<'before' | 'after'>('before')
+  const [bulletSpacing, setBulletSpacing] = useState(8)
+  const [bulletAlign, setBulletAlign] = useState<'top' | 'middle' | 'bottom'>('middle')
+  const [numberStart, setNumberStart] = useState(1)
+  const [numberFormat, setNumberFormat] = useState<'1' | '①' | '一' | '壹'>('1')
+  
+  // 序号弹框拖动状态
+  const [bulletModalPosition, setBulletModalPosition] = useState({ x: 0, y: 0 })
+  const [isDragging, setIsDragging] = useState(false)
   
   // 提取文字样式（排除位置和尺寸）
   const extractTextStyles = (textObject: fabric.Textbox): any => {
@@ -271,7 +287,390 @@ export default function RightSidebar({
     }
   }, [selectedObject, isPencilModeActive])
 
+  // 拖动处理函数 - 必须在早期返回之前定义
+  const dragStartRef = useRef({ x: 0, y: 0 })
+  const isDraggingRef = useRef(false)
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement
+    // 只允许在标题栏区域拖动，排除按钮
+    if (target.closest('.ant-modal-header') && !target.closest('button') && !target.closest('.ant-modal-close')) {
+      e.preventDefault()
+      setIsDragging(true)
+      isDraggingRef.current = true
+      dragStartRef.current = {
+        x: e.clientX - bulletModalPosition.x,
+        y: e.clientY - bulletModalPosition.y
+      }
+    }
+  }, [bulletModalPosition])
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (isDraggingRef.current) {
+      setBulletModalPosition({
+        x: e.clientX - dragStartRef.current.x,
+        y: e.clientY - dragStartRef.current.y
+      })
+    }
+  }, [])
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false)
+    isDraggingRef.current = false
+  }, [])
+
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove)
+        document.removeEventListener('mouseup', handleMouseUp)
+      }
+    }
+  }, [isDragging, handleMouseMove, handleMouseUp])
+
   if (!canvas) return null
+
+  // 序号功能：生成序号符号
+  const getBulletSymbol = (type: string, index: number = 1): string => {
+    switch (type) {
+      case 'number':
+        switch (numberFormat) {
+          case '1':
+            return `${numberStart + index - 1}.`
+          case '①':
+            const circleNumbers = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩']
+            return circleNumbers[(numberStart + index - 2) % 10] || `${numberStart + index - 1}.`
+          case '一':
+            const chineseNumbers = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十']
+            return chineseNumbers[(numberStart + index - 2) % 10] || `${numberStart + index - 1}.`
+          case '壹':
+            const traditionalNumbers = ['壹', '貳', '參', '肆', '伍', '陸', '柒', '捌', '玖', '拾']
+            return traditionalNumbers[(numberStart + index - 2) % 10] || `${numberStart + index - 1}.`
+          default:
+            return `${numberStart + index - 1}.`
+        }
+      case 'dot':
+        return '●'
+      case 'circle':
+        return '○'
+      case 'diamond':
+        return '◆'
+      case 'emptyDiamond':
+        return '◇'
+      case 'arrow':
+        return '→'
+      case 'square':
+        return '■'
+      case 'emptySquare':
+        return '□'
+      case 'triangle':
+        return '▲'
+      case 'emptyTriangle':
+        return '△'
+      case 'star':
+        return '★'
+      case 'emptyStar':
+        return '☆'
+      default:
+        return '•'
+    }
+  }
+
+  // 序号功能：应用序号到文字
+  const applyBulletToText = () => {
+    if (!canvas || !selectedObject || (selectedObject.type !== 'textbox' && selectedObject.type !== 'text')) {
+      message.warning('请先选中文字元素')
+      return
+    }
+
+    const textObject = selectedObject as fabric.Textbox
+    const currentText = textObject.text || ''
+    
+    // 检查是否已有序号
+    const hasBullet = (textObject as any).hasBullet || false
+    
+    if (hasBullet) {
+      // 如果已有序号，先移除
+      const lines = currentText.split('\n')
+      const cleanedLines = lines.map(line => {
+        // 移除常见的序号格式
+        return line.replace(/^[\d①②③④⑤⑥⑦⑧⑨⑩一二三四五六七八九十壹貳參肆伍陸柒捌玖拾]+[\.、]\s*/, '')
+          .replace(/^[●○◆◇→■□▲△★☆•]\s*/, '')
+      })
+      textObject.set('text', cleanedLines.join('\n'))
+      ;(textObject as any).hasBullet = false
+    } else {
+      // 添加序号
+      const lines = currentText.split('\n')
+      const bulletedLines = lines.map((line, index) => {
+        const symbol = getBulletSymbol(bulletType, index + 1)
+        const spacing = ' '.repeat(Math.max(0, Math.floor(bulletSpacing / 4))) // 简单的间距实现
+        return bulletPosition === 'before' ? `${symbol}${spacing}${line}` : `${line}${spacing}${symbol}`
+      })
+      textObject.set('text', bulletedLines.join('\n'))
+      ;(textObject as any).hasBullet = true
+      ;(textObject as any).bulletType = bulletType
+      ;(textObject as any).bulletColor = bulletColor
+      ;(textObject as any).bulletSize = bulletSize
+    }
+    
+    // 更新文字尺寸
+    if (typeof (textObject as any).initDimensions === 'function') {
+      try {
+        ;(textObject as any).initDimensions()
+      } catch (e) {
+        console.warn('initDimensions 调用失败:', e)
+      }
+    }
+    
+    textObject.setCoords()
+    canvas.renderAll()
+    message.success(hasBullet ? '已移除序号' : '已添加序号')
+    setBulletModalVisible(false)
+  }
+
+  // 序号设置弹窗（在所有面板中都可以访问）
+  const bulletModalJSX = (
+    <Modal
+      key="bullet-modal"
+      title="序号设置"
+      open={bulletModalVisible}
+      onCancel={() => {
+        setBulletModalVisible(false)
+        setBulletModalPosition({ x: 0, y: 0 })
+      }}
+      onOk={applyBulletToText}
+      width={600}
+      okText="应用"
+      cancelText="取消"
+      modalRender={(modal) => (
+        <div
+          style={{
+            transform: `translate(${bulletModalPosition.x}px, ${bulletModalPosition.y}px)`,
+          }}
+          onMouseDown={handleMouseDown}
+        >
+          <style>{`
+            .ant-modal-header {
+              cursor: ${isDragging ? 'grabbing' : 'move'} !important;
+            }
+          `}</style>
+          {modal}
+        </div>
+      )}
+    >
+      <div className="space-y-4">
+        {/* 序号类型 */}
+        <div>
+          <div className="mb-2 text-sm font-medium">序号类型</div>
+          <div className="grid grid-cols-4 gap-2">
+            <Button
+              type={bulletType === 'number' ? 'primary' : 'default'}
+              onClick={() => setBulletType('number')}
+            >
+              数字
+            </Button>
+            <Button
+              type={bulletType === 'dot' ? 'primary' : 'default'}
+              onClick={() => setBulletType('dot')}
+            >
+              ●
+            </Button>
+            <Button
+              type={bulletType === 'circle' ? 'primary' : 'default'}
+              onClick={() => setBulletType('circle')}
+            >
+              ○
+            </Button>
+            <Button
+              type={bulletType === 'diamond' ? 'primary' : 'default'}
+              onClick={() => setBulletType('diamond')}
+            >
+              ◆
+            </Button>
+            <Button
+              type={bulletType === 'emptyDiamond' ? 'primary' : 'default'}
+              onClick={() => setBulletType('emptyDiamond')}
+            >
+              ◇
+            </Button>
+            <Button
+              type={bulletType === 'arrow' ? 'primary' : 'default'}
+              onClick={() => setBulletType('arrow')}
+            >
+              →
+            </Button>
+            <Button
+              type={bulletType === 'square' ? 'primary' : 'default'}
+              onClick={() => setBulletType('square')}
+            >
+              ■
+            </Button>
+            <Button
+              type={bulletType === 'emptySquare' ? 'primary' : 'default'}
+              onClick={() => setBulletType('emptySquare')}
+            >
+              □
+            </Button>
+            <Button
+              type={bulletType === 'triangle' ? 'primary' : 'default'}
+              onClick={() => setBulletType('triangle')}
+            >
+              ▲
+            </Button>
+            <Button
+              type={bulletType === 'emptyTriangle' ? 'primary' : 'default'}
+              onClick={() => setBulletType('emptyTriangle')}
+            >
+              △
+            </Button>
+            <Button
+              type={bulletType === 'star' ? 'primary' : 'default'}
+              onClick={() => setBulletType('star')}
+            >
+              ★
+            </Button>
+            <Button
+              type={bulletType === 'emptyStar' ? 'primary' : 'default'}
+              onClick={() => setBulletType('emptyStar')}
+            >
+              ☆
+            </Button>
+          </div>
+        </div>
+
+        {/* 数字序号设置 */}
+        {bulletType === 'number' && (
+          <>
+            <Divider />
+            <div>
+              <div className="mb-2 text-sm font-medium">数字格式</div>
+              <Select
+                style={{ width: '100%' }}
+                value={numberFormat}
+                onChange={setNumberFormat}
+                options={[
+                  { label: '1, 2, 3...', value: '1' },
+                  { label: '①, ②, ③...', value: '①' },
+                  { label: '一, 二, 三...', value: '一' },
+                  { label: '壹, 貳, 參...', value: '壹' },
+                ]}
+              />
+            </div>
+            <div>
+              <div className="mb-2 text-sm font-medium">起始数字</div>
+              <InputNumber
+                style={{ width: '100%' }}
+                min={1}
+                max={9999}
+                value={numberStart}
+                onChange={(value) => setNumberStart(value || 1)}
+              />
+            </div>
+          </>
+        )}
+
+        <Divider />
+
+        {/* 序号颜色 */}
+        <div>
+          <div className="mb-2 text-sm font-medium">序号颜色</div>
+          <ColorPickerWithEyeDropper
+            value={bulletColor}
+            onChange={(color) => {
+              const colorString = typeof color === 'string' 
+                ? color 
+                : (color && typeof color.toHexString === 'function' 
+                    ? color.toHexString() 
+                    : String(color || '#000000'))
+              setBulletColor(colorString)
+            }}
+          />
+        </div>
+
+        <Divider />
+
+        {/* 序号大小 */}
+        <div>
+          <div className="mb-2 text-sm font-medium">序号大小</div>
+          <Slider
+            min={8}
+            max={72}
+            value={bulletSize}
+            onChange={setBulletSize}
+          />
+          <Space.Compact style={{ width: '100%', marginTop: 8 }}>
+            <InputNumber
+              style={{ flex: 1 }}
+              min={8}
+              max={72}
+              value={bulletSize}
+              onChange={(value) => setBulletSize(value || 16)}
+            />
+            <span style={{ width: 30, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">px</span>
+          </Space.Compact>
+        </div>
+
+        <Divider />
+
+        {/* 序号位置 */}
+        <div>
+          <div className="mb-2 text-sm font-medium">序号位置</div>
+          <Radio.Group
+            value={bulletPosition}
+            onChange={(e) => setBulletPosition(e.target.value)}
+            options={[
+              { label: '文字前', value: 'before' },
+              { label: '文字后', value: 'after' },
+            ]}
+          />
+        </div>
+
+        <Divider />
+
+        {/* 序号间距 */}
+        <div>
+          <div className="mb-2 text-sm font-medium">序号间距</div>
+          <Slider
+            min={0}
+            max={50}
+            value={bulletSpacing}
+            onChange={setBulletSpacing}
+          />
+          <Space.Compact style={{ width: '100%', marginTop: 8 }}>
+            <InputNumber
+              style={{ flex: 1 }}
+              min={0}
+              max={50}
+              value={bulletSpacing}
+              onChange={(value) => setBulletSpacing(value || 0)}
+            />
+            <span style={{ width: 30, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">px</span>
+          </Space.Compact>
+          <div className="text-xs text-gray-500 mt-1">控制序号与文字的距离</div>
+        </div>
+
+        <Divider />
+
+        {/* 序号对齐 */}
+        <div>
+          <div className="mb-2 text-sm font-medium">序号对齐</div>
+          <Select
+            style={{ width: '100%' }}
+            value={bulletAlign}
+            onChange={setBulletAlign}
+            options={[
+              { label: '上对齐', value: 'top' },
+              { label: '居中', value: 'middle' },
+              { label: '下对齐', value: 'bottom' },
+            ]}
+          />
+        </div>
+      </div>
+    </Modal>
+  )
 
   // 组编辑面板（多选）
   if (activePanel === 'group' && selectedObject && (selectedObject.type === 'activeSelection' || selectedObject.type === 'group')) {
@@ -858,6 +1257,7 @@ export default function RightSidebar({
   // 画板编辑面板
   if (activePanel === 'canvas' || !selectedObject) {
     return (
+      <>
       <div className="space-y-4 w-full overflow-x-hidden">
         <div className="font-semibold text-text-primary">画板编辑</div>
         
@@ -1028,6 +1428,8 @@ export default function RightSidebar({
           </Button>
         </div>
       </div>
+      {bulletModalJSX}
+    </>
     )
   }
 
@@ -1184,6 +1586,7 @@ export default function RightSidebar({
     }
 
     return (
+      <>
       <div className="space-y-4 max-h-[calc(100vh-200px)] overflow-y-auto overflow-x-hidden w-full">
         <div className="font-semibold text-text-primary">文字编辑 ({textType})</div>
 
@@ -1353,6 +1756,21 @@ export default function RightSidebar({
             {formatBrushActive === 'text' ? '格式刷（已激活）' : '格式刷'}
           </Button>
         </div>
+
+        {/* 序号 */}
+        <div>
+          <Button
+            block
+            icon={<OrderedListOutlined />}
+            onClick={() => {
+              setBulletModalVisible(true)
+            }}
+          >
+            序号
+          </Button>
+        </div>
+
+        <Divider className="my-2" />
 
         {/* 复制/删除 */}
         <Space className="w-full">
@@ -1870,6 +2288,8 @@ export default function RightSidebar({
           </>
         )}
       </div>
+      {bulletModalJSX}
+    </>
     )
   }
 
@@ -3284,7 +3704,8 @@ export default function RightSidebar({
     )
   }
 
-  return null
+  // 如果没有任何面板匹配，返回 null，但序号弹窗仍然可以显示
+  return bulletModalJSX
 }
 
 
