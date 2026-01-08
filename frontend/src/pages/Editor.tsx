@@ -131,6 +131,47 @@ export default function Editor() {
   
   /* ---------- format brush ---------- */
   const formatBrushRef = useRef<{ type: 'text' | 'image' | 'shape' | null; styles: any }>({ type: null, styles: null })
+  
+  /* ---------- pencil tool ---------- */
+  const [isPencilModeActive, setIsPencilModeActive] = useState(false)
+  const [pencilDrawMode, setPencilDrawMode] = useState<'free' | 'line'>('free')
+  const [pencilAutoSmooth, setPencilAutoSmooth] = useState(true)
+  const [pencilSmoothLevel, setPencilSmoothLevel] = useState(50)
+  const [pencilColor, setPencilColor] = useState('#000000')
+  const [pencilWidth, setPencilWidth] = useState(2)
+  const [pencilStrokeLineCap, setPencilStrokeLineCap] = useState<'round' | 'butt'>('round')
+  const [pencilStrokeDashArray, setPencilStrokeDashArray] = useState<number[] | null>(null)
+  const [pencilOpacity, setPencilOpacity] = useState(100)
+  const lineDrawingStartPointRef = useRef<{ x: number; y: number } | null>(null)
+  const lineDrawingModeRef = useRef(false)
+  
+  // 使用 ref 存储最新的铅笔工具参数，确保在事件处理中使用最新值
+  const pencilColorRef = useRef('#000000')
+  const pencilWidthRef = useRef(2)
+  const pencilStrokeLineCapRef = useRef<'round' | 'butt'>('round')
+  const pencilStrokeDashArrayRef = useRef<number[] | null>(null)
+  const pencilOpacityRef = useRef(100)
+  
+  // 同步状态到 ref
+  useEffect(() => {
+    pencilColorRef.current = pencilColor
+  }, [pencilColor])
+  
+  useEffect(() => {
+    pencilWidthRef.current = pencilWidth
+  }, [pencilWidth])
+  
+  useEffect(() => {
+    pencilStrokeLineCapRef.current = pencilStrokeLineCap
+  }, [pencilStrokeLineCap])
+  
+  useEffect(() => {
+    pencilStrokeDashArrayRef.current = pencilStrokeDashArray
+  }, [pencilStrokeDashArray])
+  
+  useEffect(() => {
+    pencilOpacityRef.current = pencilOpacity
+  }, [pencilOpacity])
 
   /* =========================
      refs 同步
@@ -220,6 +261,170 @@ export default function Editor() {
      Fabric 事件绑定
   ========================= */
 
+  // 铅笔工具：进入/退出绘制模式
+  const handleEnterPencilMode = (drawMode: 'free' | 'line', autoSmooth: boolean, smoothLevel: number) => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    
+    // 更新状态
+    setIsPencilModeActive(true)
+    setPencilDrawMode(drawMode)
+    setPencilAutoSmooth(autoSmooth)
+    setPencilSmoothLevel(smoothLevel)
+    
+    // 根据绘制模式设置
+    if (drawMode === 'free') {
+      // 自由绘制模式
+      canvas.isDrawingMode = true
+      const brush = canvas.freeDrawingBrush
+      if (brush) {
+        // 确保颜色值是字符串格式，使用 ref 获取最新值
+        brush.color = typeof pencilColorRef.current === 'string' 
+          ? pencilColorRef.current 
+          : String(pencilColorRef.current || '#000000')
+        brush.width = pencilWidthRef.current
+      }
+      
+      // 监听路径创建事件，应用平滑
+      const pathCreatedHandler = (e: any) => {
+        const path = e.path
+        if (!path) return
+        
+        // ⭐ 使用 ref 获取最新的值，而不是闭包中的旧值
+        const currentColor = typeof pencilColorRef.current === 'string' 
+          ? pencilColorRef.current 
+          : String(pencilColorRef.current || '#000000')
+        const currentWidth = pencilWidthRef.current
+        const currentLineCap = pencilStrokeLineCapRef.current
+        const currentDashArray = pencilStrokeDashArrayRef.current
+        const currentOpacity = pencilOpacityRef.current
+        
+        // 应用样式（确保颜色值是字符串格式）
+        path.set({
+          stroke: currentColor,
+          strokeWidth: currentWidth,
+          strokeLineCap: currentLineCap,
+          strokeDashArray: currentDashArray,
+          opacity: currentOpacity / 100,
+        })
+        
+        // 应用平滑算法
+        if (autoSmooth && smoothLevel > 0 && path.path) {
+          const points = path.path.map((p: any) => ({ x: p[1], y: p[2] }))
+          const tolerance = (smoothLevel / 100) * 10 // 根据平滑级别计算容差
+          const simplified = simplifyPath(points, tolerance)
+          
+          // 更新路径
+          if (simplified.length >= 2) {
+            const newPath = simplified.map((p, i) => {
+              if (i === 0) return ['M', p.x, p.y]
+              return ['L', p.x, p.y]
+            })
+            path.set('path', newPath as any)
+          }
+        }
+        
+        // ⭐ 重要：在应用平滑后，再次确保样式正确应用（因为 set('path') 可能会重置某些属性）
+        path.set({
+          stroke: currentColor,
+          strokeWidth: currentWidth,
+          strokeLineCap: currentLineCap,
+          strokeDashArray: currentDashArray,
+          opacity: currentOpacity / 100,
+        })
+        
+        canvas.renderAll()
+        
+        // 触发变更（保存画布状态）
+        if (isApplyingRef.current) return
+        syncCanvasToPage(true, true)
+        setHasUnsavedChanges(true)
+      }
+      
+      canvas.on('path:created', pathCreatedHandler)
+    } else {
+      // 直线绘制模式
+      canvas.isDrawingMode = false
+      lineDrawingModeRef.current = true
+      lineDrawingStartPointRef.current = null
+    }
+    
+    canvas.renderAll()
+  }
+  
+  const handleExitPencilMode = () => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    
+    setIsPencilModeActive(false)
+    canvas.isDrawingMode = false
+    lineDrawingModeRef.current = false
+    lineDrawingStartPointRef.current = null
+    
+    // 移除路径创建事件监听
+    canvas.off('path:created')
+    
+    canvas.renderAll()
+  }
+  
+  // 铅笔工具：Douglas-Peucker 简化算法（用于线条平滑）
+  const simplifyPath = (points: { x: number; y: number }[], tolerance: number): { x: number; y: number }[] => {
+    if (points.length <= 2) return points
+    
+    const sqTolerance = tolerance * tolerance
+    
+    const simplifyDPStep = (points: { x: number; y: number }[], first: number, last: number, sqTolerance: number, simplified: { x: number; y: number }[]): void => {
+      let maxSqDist = sqTolerance
+      let index = 0
+      
+      for (let i = first + 1; i < last; i++) {
+        const sqDist = getSqSegDist(points[i], points[first], points[last])
+        if (sqDist > maxSqDist) {
+          index = i
+          maxSqDist = sqDist
+        }
+      }
+      
+      if (maxSqDist > sqTolerance) {
+        if (index - first > 1) {
+          simplifyDPStep(points, first, index, sqTolerance, simplified)
+        }
+        simplified.push(points[index])
+        if (last - index > 1) {
+          simplifyDPStep(points, index, last, sqTolerance, simplified)
+        }
+      }
+    }
+    
+    const getSqSegDist = (p: { x: number; y: number }, p1: { x: number; y: number }, p2: { x: number; y: number }): number => {
+      let x = p1.x
+      let y = p1.y
+      let dx = p2.x - x
+      let dy = p2.y - y
+      
+      if (dx !== 0 || dy !== 0) {
+        const t = ((p.x - x) * dx + (p.y - y) * dy) / (dx * dx + dy * dy)
+        if (t > 1) {
+          x = p2.x
+          y = p2.y
+        } else if (t > 0) {
+          x += dx * t
+          y += dy * t
+        }
+      }
+      
+      dx = p.x - x
+      dy = p.y - y
+      return dx * dx + dy * dy
+    }
+    
+    const simplified: { x: number; y: number }[] = [points[0]]
+    simplifyDPStep(points, 0, points.length - 1, sqTolerance, simplified)
+    simplified.push(points[points.length - 1])
+    
+    return simplified
+  }
+
   const bindCanvasEvents = (canvas: fabric.Canvas) => {
     // 保存对象在"选择前"的位置（用于检测 fabric.js 是否自动改变了位置）
     const positionsBeforeSelection = new WeakMap<fabric.Object, { left: number; top: number }>()
@@ -228,8 +433,49 @@ export default function Editor() {
     
     // 在鼠标按下时保存所有对象的位置（在创建 ActiveSelection 之前）
     // 这是"选择前的状态"，用于检测 fabric.js 是否自动改变了位置
-    canvas.on('mouse:down', () => {
+    canvas.on('mouse:down', (e: fabric.IEvent) => {
       isUserOperating = false
+      
+      // ⭐ 铅笔工具：直线绘制模式处理
+      if (isPencilModeActive && pencilDrawMode === 'line' && lineDrawingModeRef.current) {
+        const pointer = canvas.getPointer(e.e)
+        
+        if (!lineDrawingStartPointRef.current) {
+          // 第一次点击：记录起点
+          lineDrawingStartPointRef.current = { x: pointer.x, y: pointer.y }
+        } else {
+          // 第二次点击：创建直线
+          const start = lineDrawingStartPointRef.current
+          // ⭐ 使用 ref 获取最新的值
+          const currentColor = typeof pencilColorRef.current === 'string' 
+            ? pencilColorRef.current 
+            : String(pencilColorRef.current || '#000000')
+          const line = new fabric.Line([start.x, start.y, pointer.x, pointer.y], {
+            stroke: currentColor,
+            strokeWidth: pencilWidthRef.current,
+            strokeLineCap: pencilStrokeLineCapRef.current,
+            strokeDashArray: pencilStrokeDashArrayRef.current,
+            opacity: pencilOpacityRef.current / 100,
+            selectable: true,
+            evented: true,
+          })
+          
+          canvas.add(line)
+          canvas.setActiveObject(line)
+          canvas.renderAll()
+          
+          // 重置起点，准备下一次绘制
+          lineDrawingStartPointRef.current = { x: pointer.x, y: pointer.y }
+          
+          // 触发变更
+          setTimeout(() => {
+            onChange()
+          }, 10)
+        }
+        
+        return // 阻止默认行为
+      }
+      
       const objects = canvas.getObjects()
       objects.forEach((obj: fabric.Object) => {
         // 确保保存的位置是有效的（不是 undefined 或 null）
@@ -614,6 +860,13 @@ export default function Editor() {
           target.closest('.ant-select') ||
           target.closest('.ant-modal') ||
           target.closest('.ant-drawer')
+      
+      // 处理 ESC 键（退出直线绘制模式）
+      if (e.key === 'Escape' && isPencilModeActive && pencilDrawMode === 'line' && lineDrawingModeRef.current) {
+        lineDrawingStartPointRef.current = null
+        message.info('已退出直线绘制模式，可继续绘制或切换模式')
+        return
+      }
       
       // 处理 Ctrl+C (复制)
       if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !isInputElement) {
@@ -2526,6 +2779,10 @@ export default function Editor() {
           onAddImage={addImage}
           onApplyTemplate={handleApplyTemplate}
           onSelectArticle={handleSelectArticle}
+          onEnterPencilMode={(drawMode, autoSmooth, smoothLevel) => {
+            handleEnterPencilMode(drawMode, autoSmooth, smoothLevel)
+          }}
+          onExitPencilMode={handleExitPencilMode}
           onApplyToCanvas={(canvasIndex, canvasData, canvasCodeMap, smartTruncate) => {
             // 返回 Promise，以便串行处理
             return new Promise<void>((resolve) => {
@@ -2694,6 +2951,17 @@ export default function Editor() {
               onFormatBrushActive={(type, styles) => {
                 formatBrushRef.current = { type, styles }
               }}
+              isPencilModeActive={isPencilModeActive}
+              pencilColor={pencilColor}
+              pencilWidth={pencilWidth}
+              pencilStrokeLineCap={pencilStrokeLineCap}
+              pencilStrokeDashArray={pencilStrokeDashArray}
+              pencilOpacity={pencilOpacity}
+              onPencilColorChange={setPencilColor}
+              onPencilWidthChange={setPencilWidth}
+              onPencilStrokeLineCapChange={setPencilStrokeLineCap}
+              onPencilStrokeDashArrayChange={setPencilStrokeDashArray}
+              onPencilOpacityChange={setPencilOpacity}
             />
           </div>
         </div>

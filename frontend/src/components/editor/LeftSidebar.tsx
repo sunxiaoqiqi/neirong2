@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Button, Drawer, Input, Upload, message, Modal, Space, Tabs, Select, Slider, Collapse, Tooltip, Tag, Card, Dropdown, Badge, Empty } from 'antd'
+import { Button, Drawer, Input, Upload, message, Modal, Space, Tabs, Select, Slider, Collapse, Tooltip, Tag, Card, Dropdown, Badge, Empty, Switch, Divider } from 'antd'
 import ColorPickerWithEyeDropper from './ColorPickerWithEyeDropper'
 import {
   FileImageOutlined,
@@ -17,6 +17,7 @@ import {
   CheckOutlined,
   PlusOutlined,
   WechatOutlined,
+  EditFilled,
 } from '@ant-design/icons'
 import type { Material } from '@/types/material'
 import { materialService } from '@/services/materialService'
@@ -94,6 +95,17 @@ const generateUniqueLayerName = (canvas, baseName) => {
   return baseName
 }
 
+interface LeftSidebarProps {
+  canvas: fabric.Canvas | null
+  onAddText: (type: string) => void
+  onAddImage: (url: string) => void
+  onApplyTemplate: (templateData: any) => void
+  onApplyToCanvas: (canvasIndex: number) => Promise<void>
+  onSelectArticle: (article: any) => void
+  onEnterPencilMode?: (drawMode: 'free' | 'line', autoSmooth: boolean, smoothLevel: number) => void
+  onExitPencilMode?: () => void
+}
+
 export default function LeftSidebar({
     canvas,
     onAddText,
@@ -101,7 +113,9 @@ export default function LeftSidebar({
     onApplyTemplate,
     onApplyToCanvas,
     onSelectArticle,
-  }) {
+    onEnterPencilMode,
+    onExitPencilMode,
+  }: LeftSidebarProps) {
   // 模板相关状态
   const [templateDrawerVisible, setTemplateDrawerVisible] = useState(false)
   const [templates, setTemplates] = useState<any[]>([])
@@ -125,6 +139,13 @@ export default function LeftSidebar({
   const [userArticleInput, setUserArticleInput] = useState('')
   const [aiPromptResult, setAiPromptResult] = useState('')
   const [analysisLoading, setAnalysisLoading] = useState(false)
+  
+  // 铅笔工具相关状态
+  const [pencilDrawerVisible, setPencilDrawerVisible] = useState(false)
+  const [autoSmoothEnabled, setAutoSmoothEnabled] = useState(true)
+  const [smoothLevel, setSmoothLevel] = useState(50) // 0-100%
+  const [drawMode, setDrawMode] = useState<'free' | 'line'>('free')
+  const [isPencilModeActive, setIsPencilModeActive] = useState(false)
   
   // 分析模板内容
   const analyzeTemplate = () => {
@@ -1706,7 +1727,18 @@ export default function LeftSidebar({
           </Button>
         </div>
         
-        {/* 8. 文本解析 (2.1.3.8) */}
+        {/* 8. 铅笔工具 (2.1.3.8) */}
+        <div>
+          <Button
+            block
+            icon={<EditFilled />}
+            onClick={() => setPencilDrawerVisible(true)}
+          >
+            铅笔工具
+          </Button>
+        </div>
+
+        {/* 9. 文本解析 */}
         <div>
           <Button
             block
@@ -2987,6 +3019,102 @@ export default function LeftSidebar({
           setArticleListVisible(false)
         }}
       />
+
+      {/* 铅笔工具抽屉 */}
+      <Drawer
+        title="铅笔工具"
+        placement="left"
+        onClose={() => setPencilDrawerVisible(false)}
+        open={pencilDrawerVisible}
+        width={400}
+      >
+        <div className="space-y-4">
+          {/* 自动平滑 */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm font-medium">自动平滑</div>
+              <Switch
+                checked={autoSmoothEnabled}
+                onChange={setAutoSmoothEnabled}
+              />
+            </div>
+            {autoSmoothEnabled && (
+              <div>
+                <Slider
+                  min={0}
+                  max={100}
+                  value={smoothLevel}
+                  onChange={setSmoothLevel}
+                  marks={{
+                    0: '0%',
+                    50: '50%',
+                    100: '100%',
+                  }}
+                />
+                <div className="text-xs text-gray-500 mt-1">
+                  数值越高，线条越圆润，减少手绘的抖动
+                </div>
+              </div>
+            )}
+          </div>
+
+          <Divider />
+
+          {/* 绘制模式 */}
+          <div>
+            <div className="text-sm font-medium mb-2">绘制模式</div>
+            <Select
+              style={{ width: '100%' }}
+              value={drawMode}
+              onChange={setDrawMode}
+              options={[
+                { label: '自由绘制', value: 'free' },
+                { label: '直线绘制', value: 'line' },
+              ]}
+            />
+            <div className="text-xs text-gray-500 mt-1">
+              {drawMode === 'free' 
+                ? '自由手绘线条' 
+                : '点击画板两点自动生成直线，可以连续绘制多条直线'}
+            </div>
+          </div>
+
+          <Divider />
+
+          {/* 进入/退出铅笔模式 */}
+          <div>
+            {!isPencilModeActive ? (
+              <Button
+                type="primary"
+                block
+                onClick={() => {
+                  setIsPencilModeActive(true)
+                  if (onEnterPencilMode) {
+                    onEnterPencilMode(drawMode, autoSmoothEnabled, smoothLevel)
+                  }
+                  message.success('已进入铅笔模式')
+                }}
+              >
+                进入铅笔模式
+              </Button>
+            ) : (
+              <Button
+                danger
+                block
+                onClick={() => {
+                  setIsPencilModeActive(false)
+                  if (onExitPencilMode) {
+                    onExitPencilMode()
+                  }
+                  message.info('已退出铅笔模式')
+                }}
+              >
+                退出铅笔模式
+              </Button>
+            )}
+          </div>
+        </div>
+      </Drawer>
     </div>
   );
 }

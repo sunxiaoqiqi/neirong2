@@ -31,12 +31,43 @@ interface RightSidebarProps {
   zoom?: number
   onZoomChange?: (zoom: number) => void
   onFormatBrushActive?: (type: 'text' | 'image' | 'shape' | null, styles: any) => void
+  isPencilModeActive?: boolean
+  pencilColor?: string
+  pencilWidth?: number
+  pencilStrokeLineCap?: 'round' | 'butt'
+  pencilStrokeDashArray?: number[] | null
+  pencilOpacity?: number
+  onPencilColorChange?: (color: string) => void
+  onPencilWidthChange?: (width: number) => void
+  onPencilStrokeLineCapChange?: (cap: 'round' | 'butt') => void
+  onPencilStrokeDashArrayChange?: (dashArray: number[] | null) => void
+  onPencilOpacityChange?: (opacity: number) => void
 }
 
-export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, onEnterMagicWandMode, onEnterEraseMode, zoom = 1, onZoomChange, onFormatBrushActive }: RightSidebarProps) {
+export default function RightSidebar({ 
+  canvas, 
+  selectedObject, 
+  onEnterCropMode, 
+  onEnterMagicWandMode, 
+  onEnterEraseMode, 
+  zoom = 1, 
+  onZoomChange, 
+  onFormatBrushActive,
+  isPencilModeActive = false,
+  pencilColor = '#000000',
+  pencilWidth = 2,
+  pencilStrokeLineCap = 'round',
+  pencilStrokeDashArray = null,
+  pencilOpacity = 100,
+  onPencilColorChange,
+  onPencilWidthChange,
+  onPencilStrokeLineCapChange,
+  onPencilStrokeDashArrayChange,
+  onPencilOpacityChange,
+}: RightSidebarProps) {
   // 所有Hooks必须在组件顶层调用
   // 面板状态
-  const [activePanel, setActivePanel] = useState<'canvas' | 'text' | 'image' | 'shape' | 'group' | null>(null);
+  const [activePanel, setActivePanel] = useState<'canvas' | 'text' | 'image' | 'shape' | 'group' | 'pencil' | null>(null);
   
   // 格式刷状态
   const [formatBrushActive, setFormatBrushActive] = useState<'text' | 'image' | 'shape' | null>(null);
@@ -150,6 +181,12 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
   const [shapeTop, setShapeTop] = useState(0)
 
   useEffect(() => {
+    // ⭐ 优先检查铅笔模式
+    if (isPencilModeActive) {
+      setActivePanel('pencil')
+      return
+    }
+    
     if (!selectedObject) {
       setActivePanel('canvas')
       return
@@ -232,7 +269,7 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
       setShapeLeft(selectedObject.left || 0)
       setShapeTop(selectedObject.top || 0)
     }
-  }, [selectedObject])
+  }, [selectedObject, isPencilModeActive])
 
   if (!canvas) return null
 
@@ -631,6 +668,188 @@ export default function RightSidebar({ canvas, selectedObject, onEnterCropMode, 
               </Button>
             )}
           </Space>
+        </div>
+      </div>
+    )
+  }
+
+  // 铅笔编辑面板
+  if (activePanel === 'pencil') {
+    return (
+      <div className="space-y-4 w-full overflow-x-hidden">
+        <div className="font-semibold text-text-primary">铅笔编辑</div>
+        
+        {/* 线条颜色 */}
+        <div>
+          <div className="mb-2 text-sm text-text-secondary">线条颜色</div>
+          {onPencilColorChange && (
+            <ColorPickerWithEyeDropper
+              value={pencilColor}
+              onChange={(color) => {
+                // ColorPickerWithEyeDropper 返回的是颜色对象，需要调用 toHexString() 方法
+                const colorString = typeof color === 'string' 
+                  ? color 
+                  : (color && typeof color.toHexString === 'function' 
+                      ? color.toHexString() 
+                      : String(color || '#000000'))
+                onPencilColorChange(colorString)
+                // 更新画布的画笔颜色
+                if (canvas && canvas.isDrawingMode && canvas.freeDrawingBrush) {
+                  canvas.freeDrawingBrush.color = colorString
+                }
+              }}
+            />
+          )}
+        </div>
+
+        <Divider className="my-2" />
+
+        {/* 线条粗细 */}
+        <div>
+          <div className="mb-2 text-sm text-text-secondary">线条粗细</div>
+          <Slider
+            min={1}
+            max={50}
+            value={pencilWidth}
+            onChange={(value) => {
+              if (onPencilWidthChange) {
+                onPencilWidthChange(value)
+                // 更新画布的画笔宽度
+                if (canvas && canvas.isDrawingMode && canvas.freeDrawingBrush) {
+                  canvas.freeDrawingBrush.width = value
+                }
+              }
+            }}
+          />
+          <Space.Compact style={{ width: '100%', marginTop: 8 }}>
+            <InputNumber
+              style={{ flex: 1 }}
+              min={1}
+              max={50}
+              value={pencilWidth}
+              onChange={(value) => {
+                if (onPencilWidthChange && value !== null) {
+                  onPencilWidthChange(value)
+                  // 更新画布的画笔宽度
+                  if (canvas && canvas.isDrawingMode && canvas.freeDrawingBrush) {
+                    canvas.freeDrawingBrush.width = value
+                  }
+                }
+              }}
+            />
+            <span style={{ width: 30, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">px</span>
+          </Space.Compact>
+        </div>
+
+        <Divider className="my-2" />
+
+        {/* 线条端点 */}
+        <div>
+          <div className="mb-2 text-sm text-text-secondary">线条端点</div>
+          <Space>
+            <Button
+              type={pencilStrokeLineCap === 'round' ? 'primary' : 'default'}
+              icon={<span>○</span>}
+              onClick={() => {
+                if (onPencilStrokeLineCapChange) {
+                  onPencilStrokeLineCapChange('round')
+                }
+              }}
+            >
+              圆头
+            </Button>
+            <Button
+              type={pencilStrokeLineCap === 'butt' ? 'primary' : 'default'}
+              icon={<span>▬</span>}
+              onClick={() => {
+                if (onPencilStrokeLineCapChange) {
+                  onPencilStrokeLineCapChange('butt')
+                }
+              }}
+            >
+              平头
+            </Button>
+          </Space>
+        </div>
+
+        <Divider className="my-2" />
+
+        {/* 线条样式 */}
+        <div>
+          <div className="mb-2 text-sm text-text-secondary">线条样式</div>
+          <Select
+            style={{ width: '100%' }}
+            value={pencilStrokeDashArray === null ? 'solid' : (pencilStrokeDashArray[0] === 5 ? 'dashed' : 'dotted')}
+            onChange={(value) => {
+              if (onPencilStrokeDashArrayChange) {
+                if (value === 'solid') {
+                  onPencilStrokeDashArrayChange(null)
+                } else if (value === 'dashed') {
+                  onPencilStrokeDashArrayChange([5, 5])
+                } else if (value === 'dotted') {
+                  onPencilStrokeDashArrayChange([2, 2])
+                }
+              }
+            }}
+            options={[
+              { label: '实线', value: 'solid' },
+              { label: '虚线', value: 'dashed' },
+              { label: '点线', value: 'dotted' },
+            ]}
+          />
+        </div>
+
+        <Divider className="my-2" />
+
+        {/* 透明度 */}
+        <div>
+          <div className="mb-2 text-sm text-text-secondary">透明度</div>
+          <Slider
+            min={0}
+            max={100}
+            value={pencilOpacity}
+            onChange={(value) => {
+              if (onPencilOpacityChange) {
+                onPencilOpacityChange(value)
+              }
+            }}
+          />
+          <Space.Compact style={{ width: '100%', marginTop: 8 }}>
+            <InputNumber
+              style={{ flex: 1 }}
+              min={0}
+              max={100}
+              value={pencilOpacity}
+              onChange={(value) => {
+                if (onPencilOpacityChange && value !== null) {
+                  onPencilOpacityChange(value)
+                }
+              }}
+            />
+            <span style={{ width: 30, display: 'inline-block', textAlign: 'center', height: 32, lineHeight: '32px' }} className="text-sm text-text-secondary">%</span>
+          </Space.Compact>
+        </div>
+
+        <Divider className="my-2" />
+
+        {/* 清除线条 */}
+        <div>
+          <Button
+            block
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => {
+              if (canvas && selectedObject) {
+                canvas.remove(selectedObject)
+                canvas.renderAll()
+                message.success('已删除线条')
+              } else {
+                message.warning('请先选中要删除的线条')
+              }
+            }}
+          >
+            清除线条
+          </Button>
         </div>
       </div>
     )
