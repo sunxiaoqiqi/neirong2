@@ -22,6 +22,8 @@ import {
 } from '@ant-design/icons'
 import { fabric } from 'fabric'
 import ColorPickerWithEyeDropper from './ColorPickerWithEyeDropper'
+import TextPathFitModal, { PathFitParams } from './TextPathFitModal'
+import { applyPathFitToText, resetPathFit } from './utils/textPathFit'
 
 interface RightSidebarProps {
   canvas: fabric.Canvas | null
@@ -88,6 +90,9 @@ export default function RightSidebar({
   // 序号弹框拖动状态
   const [bulletModalPosition, setBulletModalPosition] = useState({ x: 0, y: 0 })
   const [isDragging, setIsDragging] = useState(false)
+  
+  // 路径贴合功能状态
+  const [pathFitModalVisible, setPathFitModalVisible] = useState(false)
   
   // 提取文字样式（排除位置和尺寸）
   const extractTextStyles = (textObject: fabric.Textbox): any => {
@@ -430,6 +435,44 @@ export default function RightSidebar({
     message.success(hasBullet ? '已移除序号' : '已添加序号')
     setBulletModalVisible(false)
   }
+
+  // 路径贴合处理函数（需要在弹窗定义之前）
+  const handlePathFitApply = (params: PathFitParams) => {
+    if (!canvas || !selectedObject || (selectedObject.type !== 'textbox' && selectedObject.type !== 'text')) {
+      message.warning('请先选中文字元素')
+      return
+    }
+
+    const textObject = selectedObject as fabric.Textbox
+    applyPathFitToText(textObject, params, canvas)
+    setPathFitModalVisible(false)
+  }
+
+  const handlePathFitReset = () => {
+    if (!canvas || !selectedObject || (selectedObject.type !== 'textbox' && selectedObject.type !== 'text')) {
+      return
+    }
+
+    const textObject = selectedObject as fabric.Textbox
+    resetPathFit(textObject, canvas)
+    setPathFitModalVisible(false)
+  }
+
+  // 路径贴合弹窗（在所有面板中都可以访问）
+  const pathFitModalJSX = (
+    <TextPathFitModal
+      visible={pathFitModalVisible}
+      textObject={selectedObject && (selectedObject.type === 'textbox' || selectedObject.type === 'text') 
+        ? (selectedObject as fabric.Textbox) 
+        : null}
+      canvas={canvas}
+      onCancel={() => {
+        setPathFitModalVisible(false)
+      }}
+      onApply={handlePathFitApply}
+      onReset={handlePathFitReset}
+    />
+  )
 
   // 序号设置弹窗（在所有面板中都可以访问）
   const bulletModalJSX = (
@@ -1770,6 +1813,22 @@ export default function RightSidebar({
           </Button>
         </div>
 
+        {/* 路径贴合 */}
+        <div>
+          <Button
+            block
+            onClick={() => {
+              if (!textObject || !canvas) {
+                message.warning('请先选中文字元素')
+                return
+              }
+              setPathFitModalVisible(true)
+            }}
+          >
+            路径贴合
+          </Button>
+        </div>
+
         <Divider className="my-2" />
 
         {/* 复制/删除 */}
@@ -2289,6 +2348,7 @@ export default function RightSidebar({
         )}
       </div>
       {bulletModalJSX}
+      {pathFitModalJSX}
     </>
     )
   }
@@ -3704,8 +3764,13 @@ export default function RightSidebar({
     )
   }
 
-  // 如果没有任何面板匹配，返回 null，但序号弹窗仍然可以显示
-  return bulletModalJSX
+  // 如果没有任何面板匹配，返回 null，但序号弹窗和路径贴合弹窗仍然可以显示
+  return (
+    <>
+      {bulletModalJSX}
+      {pathFitModalJSX}
+    </>
+  )
 }
 
 
